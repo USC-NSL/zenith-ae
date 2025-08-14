@@ -1,0 +1,9 @@
+# For PlusCal/TLA+
+states
+*.old
+*.out
+*.tex
+
+# Python
+*.pyc
+
