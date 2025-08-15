@@ -49,3 +49,98 @@ With full concurrency and default input DAGs, the runtime and state space descri
 ## Small Note
 
 The processes that induce switch failure and recovery are `swFailureProc` and `swResolveFailure`. These processes were explicitly mentioned to be unfair in the paper (as described in Listing 2, section 4). In this specification however, we have elected to make them fair, since otherwise we would not be able to dictate how many failures we can induce. Making them unfair again has the benefit of handling more scenarios at one time (including no failures) at the cost of much longer runtime.
+
+## What If `ZENITH` Was Wrong?
+
+To see how TLC would report an error, let us introduce a bug into our (presumably correct, it requires proof) `ZENITH`. One very simple race condition can be made between WP and MS by sending an OP first and declaring it as `IR_SENT` only _after_ we emit it.
+
+Currently, `ZENITH` specifically avoids this (in `zenith.tla`, the label `ControllerThreadSendIR` starting on line 617 set the state to `IR_SENT` on line 648, before it actually sends the instruction in label `ControllerThreadForwardIR` by calling the macro `controllerSendIR` on line 667). Let us reverse these like the following:
+
+```
+(* Line 642 ends here *)
+whichStepToFail(2, stepOfFailureWP);
+
+if (stepOfFailureWP = 1) then
+    workerPoolFails();
+else
+    if (stepOfFailureWP = 2) then
+        workerPoolFails();
+    else
+        controllerSendIR(nextIRObjectToSend);
+    end if;
+end if;
+
+ControllerThreadForwardIR:
+    controllerWaitForLockFree();
+    setNIBIRState(nextIRObjectToSend.IR, IR_SENT);
+
+    if (stepOfFailureWP = 2) then
+        workerPoolFails();
+    else
+        RCNIBEventQueue := Append(
+            RCNIBEventQueue, 
+            [type |-> IR_MOD, IR |-> nextIRObjectToSend.IR, state |-> IR_SENT]
+        );
+    end if;
+end if;
+```
+
+Since we changed the PlusCal algorithm, we should translate it again:
+```
+python3 evaluate.py --action build Zenith/zenith.tla
+```
+And now we evaluate it, without even inducing any failures:
+```
+# Output the result into `tlc.out`
+python3 evaluate.py --action check Zenith/evaluate_zenith.tla | tee tlc.out
+```
+
+TLC reports a temporal property violation (a deadlock in this case) which should have a preamble like the following:
+```
+Error: Temporal properties were violated.
+
+Error: The following behavior constitutes a counter-example:
+```
+
+To get a better sense of the trace, we get the DIFF between steps and get rid of the initial step and the PC variable (the default behavior of `trace_utils.py`). We can do this by:
+```
+# Parse the TLC trace and output a DIFF in `trace.out`
+python3 trace_utils.py tlc.out trace.out
+```
+
+The final two steps that we see are the following:
+```
+STEP 38 [[rcNibEventHandlerStep]]
+	RCNIBEventQueue: <<>>
+	RCIRStatus: <<[primary |-> IR_DONE, dual |-> IR_NONE], [primary |-> IR_SENT, dual |-> IR_NONE], [primary |-> IR_NONE, dual |-> IR_NONE]>>
+	event: (<<rc0, NIB_EVENT_HANDLER>> :> [type |-> IR_MOD, state |-> IR_SENT, IR |-> 2])
+
+STEP 39 [[Stuttering]]
+```
+The NIB Event Handler received a final update from the controller that IR index 2 has been sent and we never got the news of its installation, but if we look at the last recorded value of the switch TCAM (just look for the last time `TCAM` was seen in the trace output), we get this:
+```
+STEP 29 [[SwitchStep]]
+	switch2Controller: <<[type |-> INSTALLED_SUCCESSFULLY, flow |-> 2, from |-> s1, to |-> ofc0]>>
+	ingressPkt: (<<SW_SIMPLE_ID, s0>> :> [type |-> INSTALL_FLOW, flow |-> 1, from |-> ofc0, to |-> s0] @@ <<SW_SIMPLE_ID, s1>> :> [type |-> INSTALL_FLOW, flow |-> 2, from |-> ofc0, to |-> s1])
+	controller2Switch: (s0 :> <<>> @@ s1 :> <<>>)
+	switchLock: <<NO_LOCK, NO_LOCK>>
+	installedIRs: <<1, 2>>
+	TCAM: (s0 :> {1} @@ s1 :> {2})
+```
+The last step by our simple switch model, correctly installed the IR on switch `s1` and emitted an ACK on `switch2Controller`. Two steps further, the Monitoring Server records the installation of the IR on the NIB and sends the update to the NIB Event Handler on `RCNIBEventQueue`.
+```
+STEP 31 [[controllerMonitoringServerStep]]
+	RCNIBEventQueue: <<[type |-> IR_MOD, state |-> IR_DONE, IR |-> 2]>>
+	NIBIRStatus: <<[primary |-> IR_DONE, dual |-> IR_NONE], [primary |-> IR_DONE, dual |-> IR_NONE], [primary |-> IR_NONE, dual |-> IR_NONE]>>
+	irID: (<<ofc0, CONT_MONITOR>> :> 2)
+	FirstInstall: <<1, 1, 0, 0, 0, 0>>
+```
+However, a bit further we see the problem on step 33:
+```
+STEP 33 [[controllerWorkerThreadsStep]]
+	RCNIBEventQueue: <<[type |-> IR_MOD, state |-> IR_DONE, IR |-> 2], [type |-> IR_MOD, state |-> IR_SENT, IR |-> 2]>>
+	NIBIRStatus: <<[primary |-> IR_DONE, dual |-> IR_NONE], [primary |-> IR_SENT, dual |-> IR_NONE], [primary |-> IR_NONE, dual |-> IR_NONE]>>
+```
+Essentially, we received the ACK for IR index 2 almost immediately after we sent it, such that when Worker Pool attempted to set the state to `IR_SENT`, it was already set to `IR_DONE`!
+
+One could solve this in many ways (like a compare-and-swap on IR state in the Worker Pool for setting the state to `IR_SENT`), but we found that setting the state first and emitting the instruction later is simpler.

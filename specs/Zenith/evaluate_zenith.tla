@@ -380,7 +380,7 @@ const_OFCProcSet == (({ofc0} \X CONTROLLER_THREAD_POOL)) \cup
                     (({ofc0} \X {CONT_MONITOR}))
 
 \* Name of threads in WP
-const_CONTROLLER_THREAD_POOL == {t0, t1}
+const_CONTROLLER_THREAD_POOL == {t0}
 ----
 
 \* What sort of switch failures do we want?
@@ -392,8 +392,8 @@ const_CONTROLLER_THREAD_POOL == {t0, t1}
 \* When two failure events are specified in the same set, they happen at the exact
 \* same time. TLC will consider every scenario when failures are independent.
 
-\* const_SW_FAIL_ORDERING == <<>>
-const_SW_FAIL_ORDERING == <<{[sw |-> s0, partial |-> 0, transient |-> 1]}>>
+const_SW_FAIL_ORDERING == <<>>
+\* const_SW_FAIL_ORDERING == <<{[sw |-> s0, partial |-> 0, transient |-> 1]}>>
 \* const_SW_FAIL_ORDERING == <<{[sw |-> s0, partial |-> 0, transient |-> 1]}, {[sw |-> s0, partial |-> 0, transient |-> 1]}>>
 \* const_SW_FAIL_ORDERING == <<{[sw |-> s0, partial |-> 0, transient |-> 1]}, {[sw |-> s1, partial |-> 0, transient |-> 1]}>>
 ----
@@ -439,7 +439,7 @@ const_SW_THREAD_SHARD_MAP == (s0 :> t0) @@ (s1 :> t0)
 const_MAX_OFC_SUBMODULE_FAILS == 
     (CONT_MONITOR :> 0) @@ 
     (CONT_EVENT :> 0) @@ 
-    (t0 :> 1) @@ 
+    (t0 :> 0) @@ 
     (t1 :> 0)
 
 =============================================================================
