@@ -25,10 +25,15 @@ VARIABLES pc
 
 (* Internal variables, we'll not bother hiding them, since there is quite a few of them *)
 
-\* For simple switch
-VARIABLES sw_fail_ordering_var, SwProcSet, 
+\* For switch
+VARIABLES sw_fail_ordering_var, 
           switchStatus, TCAM, controlMsgCounter, RecoveryStatus,
-          ingressPkt, statusMsg, obj, statusResolveMsg
+          ingressPkt, statusMsg, obj, statusResolveMsg,
+          \* Specifically for complex switch model
+          NicAsic2OfaBuff, Ofa2NicAsicBuff, Installer2OfaBuff, Ofa2InstallerBuff,
+          ingressIR, egressMsg, ofaInMsg, ofaOutConfirmation, 
+          installerInIR, notFailedSet, failedElem, failedSet, 
+          recoveredElem
 
 
 \* For zenith
@@ -61,14 +66,19 @@ VARIABLES TEEventQueue, DAGEventQueue, DAGQueue,
 (* Each time either of the switches OR Zenith take a step, these CAN change *)
 shared_vars == <<
     switchLock, controllerLock,
-    controller2Switch, switch2Controller
+    controller2Switch, switch2Controller,
+    pc
 >>
 
 (* Each time Zenith takes a step, these remain unchanged *)
 internal_switch_vars == <<
-    sw_fail_ordering_var, SwProcSet, 
+    sw_fail_ordering_var, 
     switchStatus, installedIRs, TCAM, controlMsgCounter, RecoveryStatus,
-    ingressPkt, statusMsg, obj, statusResolveMsg
+    ingressPkt, statusMsg, obj, statusResolveMsg,
+    NicAsic2OfaBuff, Ofa2NicAsicBuff, Installer2OfaBuff, Ofa2InstallerBuff,
+    ingressIR, egressMsg, ofaInMsg, ofaOutConfirmation, 
+    installerInIR, notFailedSet, failedElem, failedSet, 
+    recoveredElem
 >>
 
 (* Each time a switch takes a step, these remain unchanged *)
@@ -93,8 +103,6 @@ internal_zenith_vars == <<
     eventHandlerLastIRToReset,
     eventHandlerTCAMCleared,
 
-    pc,
-
     ofcSubmoduleFailNum,
     stepOfFailureWP, stepOfFailureEH, stepOfFailureMS,
 
@@ -104,12 +112,14 @@ internal_zenith_vars == <<
 (* Any one of these variables can stutter ... *)
 vars == <<
     switchLock, controllerLock,
-    controller2Switch, switch2Controller,
-
-    sw_fail_ordering_var, SwProcSet, 
+    controller2Switch, switch2Controller, pc,
+    sw_fail_ordering_var, 
     switchStatus, installedIRs, TCAM, controlMsgCounter, RecoveryStatus,
     ingressPkt, statusMsg, obj, statusResolveMsg,
-
+    NicAsic2OfaBuff, Ofa2NicAsicBuff, Installer2OfaBuff, Ofa2InstallerBuff,
+    ingressIR, egressMsg, ofaInMsg, ofaOutConfirmation, 
+    installerInIR, notFailedSet, failedElem, failedSet, 
+    recoveredElem,
     TEEventQueue, DAGEventQueue, DAGQueue, 
     IRQueueNIB, RCNIBEventQueue, 
     DAGState, RCIRStatus, NIBIRStatus, FirstInstall,
@@ -125,16 +135,11 @@ vars == <<
     resetIR, msg, irID, 
     nextIRObjectToSend,
     swSeqChangedStatus,
-
     eventHandlerCheckpoint,
     eventHandlerLastIRToReset,
     eventHandlerTCAMCleared,
-
-    pc,
-
     ofcSubmoduleFailNum, 
     stepOfFailureWP, stepOfFailureEH, stepOfFailureMS,
-
     irsToUnschedule, unschedule
 >>
 
@@ -142,6 +147,11 @@ vars == <<
 ProcSet == 
     (* Switches *)
     (({SW_SIMPLE_ID} \X SW)) \cup 
+    (({NIC_ASIC_IN} \X SW)) \cup 
+    (({NIC_ASIC_OUT} \X SW)) \cup 
+    (({OFA_IN} \X SW)) \cup 
+    (({OFA_OUT} \X SW)) \cup 
+    (({INSTALLER} \X SW)) \cup 
     (({SW_FAILURE_PROC} \X SW)) \cup 
     (({SW_RESOLVE_PROC} \X SW)) \cup 
     (({GHOST_UNLOCK_PROC} \X SW)) \cup 
@@ -215,9 +225,6 @@ Init == (* Locks *)
         /\ installedIRs = <<>>
         (* Hidden switch variables *)
         /\ sw_fail_ordering_var = SW_FAIL_ORDERING
-        /\ SwProcSet = ((({SW_SIMPLE_ID} \X SW)) \cup
-                        (({SW_FAILURE_PROC} \X SW)) \cup
-                        (({SW_RESOLVE_PROC} \X SW)))
         /\ switchStatus =                [
                               x \in SW |-> [
                                   cpu |-> NotFailed,
@@ -227,18 +234,41 @@ Init == (* Locks *)
                               ]
                           ]
         /\ installedIRs = <<>>
+        /\ NicAsic2OfaBuff = [x \in SW |-> <<>>]
+        /\ Ofa2NicAsicBuff = [x \in SW |-> <<>>]
+        /\ Installer2OfaBuff = [x \in SW |-> <<>>]
+        /\ Ofa2InstallerBuff = [x \in SW |-> <<>>]
         /\ TCAM = [x \in SW |-> {}]
         /\ controlMsgCounter = [x \in SW |-> 0]
         /\ RecoveryStatus = [x \in SW |-> [transient |-> 0, partial |-> 0]]
         (* Process swProcess *)
-        /\ ingressPkt = [self \in ({SW_SIMPLE_ID} \X SW) |-> [type |-> 0]]
+        /\ ingressPkt = [self \in ({SW_SIMPLE_ID} \X SW) |-> NADIR_NULL]
+        (* Process swNicAsicProcPacketIn *)
+        /\ ingressIR = [self \in ({NIC_ASIC_IN} \X SW) |-> NADIR_NULL]
+        (* Process swNicAsicProcPacketOut *)
+        /\ egressMsg = [self \in ({NIC_ASIC_OUT} \X SW) |-> NADIR_NULL]
+        (* Process ofaModuleProcPacketIn *)
+        /\ ofaInMsg = [self \in ({OFA_IN} \X SW) |-> NADIR_NULL]
+        (* Process ofaModuleProcPacketOut *)
+        /\ ofaOutConfirmation = [self \in ({OFA_OUT} \X SW) |-> NADIR_NULL]
+        (* Process installerModuleProc *)
+        /\ installerInIR = [self \in ({INSTALLER} \X SW) |-> NADIR_NULL]
         (* Process swFailureProc *)
-        /\ statusMsg = [self \in ({SW_FAILURE_PROC} \X SW) |-> <<>>]
-        /\ obj = [self \in ({SW_FAILURE_PROC} \X SW) |-> [type |-> 0]]
+        /\ statusMsg = [self \in ({SW_FAILURE_PROC} \X SW) |-> NADIR_NULL]
+        /\ notFailedSet = [self \in ({SW_FAILURE_PROC} \X SW) |-> {}]
+        /\ failedElem = [self \in ({SW_FAILURE_PROC} \X SW) |-> NADIR_NULL]
+        /\ obj = [self \in ({SW_FAILURE_PROC} \X SW) |-> NADIR_NULL]
         (* Process swResolveFailure *)
-        /\ statusResolveMsg = [self \in ({SW_RESOLVE_PROC} \X SW) |-> <<>>]
+        /\ failedSet = [self \in ({SW_RESOLVE_PROC} \X SW) |-> {}]
+        /\ statusResolveMsg = [self \in ({SW_RESOLVE_PROC} \X SW) |-> NADIR_NULL]
+        /\ recoveredElem = [self \in ({SW_RESOLVE_PROC} \X SW) |-> NADIR_NULL]
         (* Global program counter *)
         /\ pc = [self \in ProcSet |-> CASE self \in ({SW_SIMPLE_ID} \X SW) -> "SwitchSimpleProcess"
+                                        [] self \in ({NIC_ASIC_IN} \X SW) -> "SwitchRcvPacket"
+                                        [] self \in ({NIC_ASIC_OUT} \X SW) -> "SwitchFromOFAPacket"
+                                        [] self \in ({OFA_IN} \X SW) -> "SwitchOfaProcIn"
+                                        [] self \in ({OFA_OUT} \X SW) -> "SwitchOfaProcOut"
+                                        [] self \in ({INSTALLER} \X SW) -> "SwitchInstallerProc"
                                         [] self \in ({SW_FAILURE_PROC} \X SW) -> "SwitchFailure"
                                         [] self \in ({SW_RESOLVE_PROC} \X SW) -> "SwitchResolveFailure"
                                         [] self \in ({GHOST_UNLOCK_PROC} \X SW) -> "ghostProc"
@@ -251,8 +281,7 @@ Init == (* Locks *)
                                         [] self \in ({ofc0} \X {CONT_MONITOR}) -> "ControllerMonitorCheckIfMastr"]
 
 (* Get instances of Zenith and the topology and create the `Next` predicate *)
-\* Switch == INSTANCE switch
-Switch == INSTANCE abstract_switch
+Switch == INSTANCE switch
 Zenith == INSTANCE zenith
 
 SwitchStep == /\ Switch!Next
@@ -286,6 +315,11 @@ Next == \/ SwitchStep
 Spec == /\ Init /\ [][Next]_vars
         /\ WF_vars(Next)
         /\ \A self \in ({SW_SIMPLE_ID} \X SW) : WF_internal_switch_vars(Switch!swProcess(self))
+        /\ \A self \in ({NIC_ASIC_IN} \X SW) : WF_internal_switch_vars(Switch!swNicAsicProcPacketIn(self))
+        /\ \A self \in ({NIC_ASIC_OUT} \X SW) : WF_internal_switch_vars(Switch!swNicAsicProcPacketOut(self))
+        /\ \A self \in ({OFA_IN} \X SW) : WF_internal_switch_vars(Switch!ofaModuleProcPacketIn(self))
+        /\ \A self \in ({OFA_OUT} \X SW) : WF_internal_switch_vars(Switch!ofaModuleProcPacketOut(self))
+        /\ \A self \in ({INSTALLER} \X SW) : WF_internal_switch_vars(Switch!installerModuleProc(self))
         /\ \A self \in ({SW_FAILURE_PROC} \X SW) : WF_internal_switch_vars(Switch!swFailureProc(self))
         /\ \A self \in ({SW_RESOLVE_PROC} \X SW) : WF_internal_switch_vars(Switch!swResolveFailure(self))
         /\ \A self \in ({GHOST_UNLOCK_PROC} \X SW) : WF_internal_switch_vars(Switch!ghostUnlockProcess(self))
@@ -333,7 +367,7 @@ s0, s1
 ----
 
 CONSTANTS
-t0
+t0, t1
 ----
 
 \* Name of the switches in our topology
@@ -346,7 +380,7 @@ const_OFCProcSet == (({ofc0} \X CONTROLLER_THREAD_POOL)) \cup
                     (({ofc0} \X {CONT_MONITOR}))
 
 \* Name of threads in WP
-const_CONTROLLER_THREAD_POOL == {t0}
+const_CONTROLLER_THREAD_POOL == {t0, t1}
 ----
 
 \* What sort of switch failures do we want?
@@ -357,9 +391,10 @@ const_CONTROLLER_THREAD_POOL == {t0}
 \*                       never recover again.
 \* When two failure events are specified in the same set, they happen at the exact
 \* same time. TLC will consider every scenario when failures are independent.
+
 \* const_SW_FAIL_ORDERING == <<>>
-\* const_SW_FAIL_ORDERING == <<{[sw |-> s0, partial |-> 0, transient |-> 1]}>>
-const_SW_FAIL_ORDERING == <<{[sw |-> s0, partial |-> 0, transient |-> 1]}, {[sw |-> s0, partial |-> 0, transient |-> 1]}>>
+const_SW_FAIL_ORDERING == <<{[sw |-> s0, partial |-> 0, transient |-> 1]}>>
+\* const_SW_FAIL_ORDERING == <<{[sw |-> s0, partial |-> 0, transient |-> 1]}, {[sw |-> s0, partial |-> 0, transient |-> 1]}>>
 \* const_SW_FAIL_ORDERING == <<{[sw |-> s0, partial |-> 0, transient |-> 1]}, {[sw |-> s1, partial |-> 0, transient |-> 1]}>>
 ----
 
@@ -401,6 +436,10 @@ const_TOPO_DAG_MAPPING ==
 const_SW_THREAD_SHARD_MAP == (s0 :> t0) @@ (s1 :> t0)
 
 \* How many module failures can we expect in the controller?
-const_MAX_OFC_SUBMODULE_FAILS == 0
+const_MAX_OFC_SUBMODULE_FAILS == 
+    (CONT_MONITOR :> 0) @@ 
+    (CONT_EVENT :> 0) @@ 
+    (t0 :> 1) @@ 
+    (t1 :> 0)
 
 =============================================================================

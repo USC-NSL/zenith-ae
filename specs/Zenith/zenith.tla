@@ -204,7 +204,7 @@ CONSTANTS OFCProcSet
                                 ))
                             ])
 
-        maxFailure(threadID) == MAX_OFC_SUBMODULE_FAILS
+        maxFailure(procID) == MAX_OFC_SUBMODULE_FAILS[procID[2]]
 
         getIRStructTag(destination) == SW_THREAD_SHARD_MAP[destination]
     end define
@@ -369,7 +369,12 @@ CONSTANTS OFCProcSet
                 ]
             );
         end if;
-        switchLock := <<SW_SIMPLE_ID, irObject.sw>>;
+
+        if whichSwitchModel(irObject.sw) = SW_SIMPLE_MODEL then
+            switchLock := <<SW_SIMPLE_ID, irObject.sw>>;
+        else
+            switchLock := <<NIC_ASIC_IN, irObject.sw>>;
+        end if;
     end macro;
 
     macro getNextDAGID()
@@ -871,7 +876,7 @@ CONSTANTS OFCProcSet
     end while
 end process
 end algorithm*)
-\* BEGIN TRANSLATION (chksum(pcal) = "a4d827f6" /\ chksum(tla) = "31ead946")
+\* BEGIN TRANSLATION (chksum(pcal) = "3fc57858" /\ chksum(tla) = "91b12075")
 VARIABLES switchLock, controllerLock, swSeqChangedStatus, controller2Switch, 
           switch2Controller, TEEventQueue, DAGEventQueue, DAGQueue, 
           IRQueueNIB, RCNIBEventQueue, DAGState, NIBIRStatus, 
@@ -978,7 +983,7 @@ CreateTEDAG(irsToRemove, dag) ==
                         ))
                     ])
 
-maxFailure(threadID) == MAX_OFC_SUBMODULE_FAILS
+maxFailure(procID) == MAX_OFC_SUBMODULE_FAILS[procID[2]]
 
 getIRStructTag(destination) == SW_THREAD_SHARD_MAP[destination]
 
@@ -1838,7 +1843,9 @@ ControllerThreadSendIR(self) == /\ pc[self] = "ControllerThreadSendIR"
                                                                                                                                                                                                                                to |-> nextIRObjectToSend[self].sw,
                                                                                                                                                                                                                                from |-> self[1]
                                                                                                                                                                                                                            ]))]
-                                                                 /\ switchLock' = <<SW_SIMPLE_ID, nextIRObjectToSend[self].sw>>
+                                                                 /\ IF whichSwitchModel(nextIRObjectToSend[self].sw) = SW_SIMPLE_MODEL
+                                                                       THEN /\ switchLock' = <<SW_SIMPLE_ID, nextIRObjectToSend[self].sw>>
+                                                                       ELSE /\ switchLock' = <<NIC_ASIC_IN, nextIRObjectToSend[self].sw>>
                                                                  /\ pc' = [pc EXCEPT ![self] = "ControllerThreadRemoveIRFromQueue"]
                                                                  /\ UNCHANGED << ofcSubmoduleFailNum, 
                                                                                  nextIRObjectToSend, 
@@ -1966,7 +1973,9 @@ ControllerThreadForwardIR(self) == /\ pc[self] = "ControllerThreadForwardIR"
                                                                                                                                                                                                             to |-> nextIRObjectToSend[self].sw,
                                                                                                                                                                                                             from |-> self[1]
                                                                                                                                                                                                         ]))]
-                                              /\ switchLock' = <<SW_SIMPLE_ID, nextIRObjectToSend[self].sw>>
+                                              /\ IF whichSwitchModel(nextIRObjectToSend[self].sw) = SW_SIMPLE_MODEL
+                                                    THEN /\ switchLock' = <<SW_SIMPLE_ID, nextIRObjectToSend[self].sw>>
+                                                    ELSE /\ switchLock' = <<NIC_ASIC_IN, nextIRObjectToSend[self].sw>>
                                               /\ pc' = [pc EXCEPT ![self] = "ControllerThreadRemoveIRFromQueue"]
                                               /\ UNCHANGED << ofcSubmoduleFailNum, 
                                                               nextIRObjectToSend, 

@@ -1,20 +1,12 @@
 ------------------- MODULE switch -------------------
-EXTENDS Integers, Sequences, FiniteSets, TLC, eval_constants, switch_constants
+EXTENDS Integers, Sequences, FiniteSets, TLC, eval_constants, switch_constants, NadirTypes
 
 (*--fair algorithm switch
     variables 
         switchLock = <<NO_LOCK, NO_LOCK>>,
         controllerLock = <<NO_LOCK, NO_LOCK>>,
         sw_fail_ordering_var = SW_FAIL_ORDERING,
-        SwProcSet = (({NIC_ASIC_IN} \X SW)) \cup 
-                    (({NIC_ASIC_OUT} \X SW)) \cup 
-                    (({OFA_IN} \X SW)) \cup 
-                    (({OFA_OUT} \X SW)) \cup 
-                    (({INSTALLER} \X SW)) \cup
-                    (({SW_FAILURE_PROC} \X SW)) \cup 
-                    (({SW_RESOLVE_PROC} \X SW)),
         
-        swSeqChangedStatus = <<>>,
         controller2Switch = [x \in SW |-> <<>>],
         switch2Controller = <<>>, 
         switchStatus = [
@@ -32,13 +24,12 @@ EXTENDS Integers, Sequences, FiniteSets, TLC, eval_constants, switch_constants
         Installer2OfaBuff = [x \in SW |-> <<>>],
         Ofa2InstallerBuff = [x \in SW |-> <<>>],
 
-        TCAM = [x \in SW |-> <<>>], 
+        TCAM = [x \in SW |-> {}], 
 
         controlMsgCounter = [x \in SW |-> 0],
         RecoveryStatus = [x \in SW |-> [transient |-> 0, partial |-> 0]]
     
     define
-        indexInSeq(seq, val) == CHOOSE i \in DOMAIN seq: seq[i] = val
         removeFromSeq(inSeq, RID) == [j \in 1..(Len(inSeq) - 1) |-> IF j < RID THEN inSeq[j]
                                                                     ELSE inSeq[j+1]]
         
@@ -46,7 +37,7 @@ EXTENDS Integers, Sequences, FiniteSets, TLC, eval_constants, switch_constants
         swOFACanProcessIRs(sw) == /\ switchStatus[sw].cpu = NotFailed
                                   /\ switchStatus[sw].ofa = NotFailed
         
-        existMatchingEntryTCAM(swID, flowID) == \E x \in rangeSeq(TCAM[swID]): x = flowID
+        existMatchingEntryTCAM(swID, flowID) == flowID \in TCAM[swID]
         swCanInstallIRs(sw) == /\ switchStatus[sw].installer = NotFailed
                                /\ switchStatus[sw].cpu = NotFailed
         
@@ -95,7 +86,7 @@ EXTENDS Integers, Sequences, FiniteSets, TLC, eval_constants, switch_constants
             statusMsg := [type |-> NIC_ASIC_DOWN, 
                             swID |-> self[2],
                             num |-> controlMsgCounter[self[2]]];
-            swSeqChangedStatus := Append(swSeqChangedStatus, statusMsg);
+            switch2Controller := Append(switch2Controller, statusMsg);
         end if;
         
         switchStatus[self[2]] := [cpu |-> Failed, nicAsic |-> Failed, 
@@ -104,7 +95,7 @@ EXTENDS Integers, Sequences, FiniteSets, TLC, eval_constants, switch_constants
         Ofa2NicAsicBuff[self[2]] := <<>>;
         Installer2OfaBuff[self[2]] := <<>>;
         Ofa2InstallerBuff[self[2]] := <<>>;
-        TCAM[self[2]] := <<>>;
+        TCAM[self[2]] := {};
         controller2Switch[self[2]] := <<>>;    
     end macro;
 
@@ -125,7 +116,7 @@ EXTENDS Integers, Sequences, FiniteSets, TLC, eval_constants, switch_constants
         Ofa2NicAsicBuff[self[2]] := <<>>;
         Installer2OfaBuff[self[2]] := <<>>;
         Ofa2InstallerBuff[self[2]] := <<>>;
-        TCAM[self[2]] := <<>>;
+        TCAM[self[2]] := {};
         controller2Switch[self[2]] := <<>>;
         
         controlMsgCounter[self[2]] := controlMsgCounter[self[2]] + 1;  
@@ -135,7 +126,7 @@ EXTENDS Integers, Sequences, FiniteSets, TLC, eval_constants, switch_constants
             num |-> controlMsgCounter[self[2]],
             installerStatus |-> getInstallerStatus(switchStatus[self[2]].installer)
         ];  
-        swSeqChangedStatus := Append(swSeqChangedStatus, statusResolveMsg);  
+        switch2Controller := Append(switch2Controller, statusResolveMsg);  
     end macro;
 
     macro nicAsicFailure()
@@ -149,7 +140,7 @@ EXTENDS Integers, Sequences, FiniteSets, TLC, eval_constants, switch_constants
             swID |-> self[2],
             num |-> controlMsgCounter[self[2]]
         ];
-        swSeqChangedStatus := Append(swSeqChangedStatus, statusMsg);              
+        switch2Controller := Append(switch2Controller, statusMsg);              
     end macro
 
     macro resolveNicAsicFailure()
@@ -174,7 +165,7 @@ EXTENDS Integers, Sequences, FiniteSets, TLC, eval_constants, switch_constants
                 installerStatus |-> getInstallerStatus(switchStatus[self[2]].installer)
             ];
         end if;
-        swSeqChangedStatus := Append(swSeqChangedStatus, statusResolveMsg);            
+        switch2Controller := Append(switch2Controller, statusResolveMsg);            
     end macro
 
     macro cpuFailure()
@@ -192,7 +183,7 @@ EXTENDS Integers, Sequences, FiniteSets, TLC, eval_constants, switch_constants
                 swID |-> self[2],
                 num |-> controlMsgCounter[self[2]]
             ];
-            swSeqChangedStatus := Append(swSeqChangedStatus, statusMsg);
+            switch2Controller := Append(switch2Controller, statusMsg);
         end if;
     end macro
 
@@ -213,7 +204,7 @@ EXTENDS Integers, Sequences, FiniteSets, TLC, eval_constants, switch_constants
                 num |-> controlMsgCounter[self[2]],
                 installerStatus |-> getInstallerStatus(switchStatus[self[2]].installer)
             ]; 
-            swSeqChangedStatus := Append(swSeqChangedStatus, statusResolveMsg);    
+            switch2Controller := Append(switch2Controller, statusResolveMsg);    
         end if;
     end macro
 
@@ -228,7 +219,7 @@ EXTENDS Integers, Sequences, FiniteSets, TLC, eval_constants, switch_constants
                 swID |-> self[2],
                 num |-> controlMsgCounter[self[2]]
             ];
-            swSeqChangedStatus := Append(swSeqChangedStatus, statusMsg);    
+            switch2Controller := Append(switch2Controller, statusMsg);    
         end if;
     end macro
 
@@ -245,7 +236,7 @@ EXTENDS Integers, Sequences, FiniteSets, TLC, eval_constants, switch_constants
                 num |-> controlMsgCounter[self[2]],
                 installerStatus |-> getInstallerStatus(switchStatus[self[2]].installer)
             ];
-            swSeqChangedStatus := Append(swSeqChangedStatus, statusResolveMsg);             
+            switch2Controller := Append(switch2Controller, statusResolveMsg);             
         end if;
     end macro
 
@@ -262,7 +253,7 @@ EXTENDS Integers, Sequences, FiniteSets, TLC, eval_constants, switch_constants
                 num |-> controlMsgCounter[self[2]],
                 installerStatus |-> getInstallerStatus(switchStatus[self[2]].installer)
             ];
-            swSeqChangedStatus := Append(swSeqChangedStatus, statusMsg);
+            switch2Controller := Append(switch2Controller, statusMsg);
         end if;
     end macro
 
@@ -280,25 +271,23 @@ EXTENDS Integers, Sequences, FiniteSets, TLC, eval_constants, switch_constants
                 num |-> controlMsgCounter[self[2]],
                 installerStatus |-> getInstallerStatus(switchStatus[self[2]].installer)
             ];
-            swSeqChangedStatus := Append(swSeqChangedStatus, statusResolveMsg);    
+            switch2Controller := Append(switch2Controller, statusResolveMsg);    
         end if;
     end macro
 
     macro installToTCAM(newFlow)
     begin
         installedIRs := Append(installedIRs, newFlow);
-        TCAM[self[2]] := Append(TCAM[self[2]], newFlow);
+        TCAM[self[2]] := TCAM[self[2]] \cup {newFlow};
     end macro
 
     macro removeFromTCAM(flowID)
     begin
-        if flowID \in rangeSeq(TCAM[self[2]]) then
-            TCAM[self[2]] := removeFromSeq(TCAM[self[2]], indexInSeq(TCAM[self[2]], flowID));
-        end if;
+        TCAM[self[2]] := (TCAM[self[2]] \ {flowID});
     end macro
 
     macro clearTCAM() begin
-        TCAM[self[2]] := <<>>;
+        TCAM[self[2]] := {};
     end macro;
 
     macro switchSend(msg)
@@ -320,35 +309,30 @@ EXTENDS Integers, Sequences, FiniteSets, TLC, eval_constants, switch_constants
         ]);
     end macro
 
-    macro sendFlowStatReplyNotFound(controllerID, flowID)
-    begin
-        switchSend([
-            type |-> FLOW_STAT_REPLY, 
-            from |-> self[2], 
-            to |-> controllerID, 
-            status |-> NO_ENTRY
-        ]);
-    end macro
-
-    macro sendFlowStatReplyEntryFound(controllerID, flowID)
-    begin
-        switchSend([
-            type |-> FLOW_STAT_REPLY, 
-            from |-> self[2], 
-            to |-> controllerID,
-            status |-> ENTRY_FOUND
-        ]); 
-    end macro
-
-    macro sendFlowStatReplyAllEntries(controllerID)
-    begin 
-        switchSend([
-            type |-> FLOW_STAT_REPLY, 
-            from |-> self[2], 
-            to |-> controllerID,
-            flows |-> rangeSeq(TCAM[self[2]])
-        ]);
-    end macro
+    macro sendClearConfirmation() begin
+        controlMsgCounter[self[2]] := controlMsgCounter[self[2]] + 1;
+        if WHICH_SWITCH_MODEL[self[2]] = SW_SIMPLE_MODEL then
+            switch2Controller := Append(
+                switch2Controller, 
+                [
+                    type |-> CLEARED_TCAM_SUCCESSFULLY, 
+                    swID |-> self[2],
+                    num |-> controlMsgCounter[self[2]],
+                    installerStatus |-> getInstallerStatus(switchStatus[self[2]].installer)
+                ]
+            );
+        else
+            Ofa2NicAsicBuff[self[2]] := Append(
+                Ofa2NicAsicBuff[self[2]], 
+                [
+                    type |-> CLEARED_TCAM_SUCCESSFULLY, 
+                    swID |-> self[2],
+                    num |-> controlMsgCounter[self[2]],
+                    installerStatus |-> getInstallerStatus(switchStatus[self[2]].installer)
+                ]
+            );
+        end if;
+    end macro;
     
     (*******************************************************************)
     (*                     LOCK System (Macros)                        *)
@@ -384,7 +368,7 @@ EXTENDS Integers, Sequences, FiniteSets, TLC, eval_constants, switch_constants
     (*******************************************************************)
 
     fair process swProcess \in ({SW_SIMPLE_ID} \X SW)
-    variables ingressPkt = [type |-> 0]
+    variables ingressPkt = NADIR_NULL
     begin
     SwitchSimpleProcess:
     while TRUE do
@@ -393,26 +377,17 @@ EXTENDS Integers, Sequences, FiniteSets, TLC, eval_constants, switch_constants
         await Len(controller2Switch[self[2]]) > 0;
         switchWaitForLock();
         ingressPkt := Head(controller2Switch[self[2]]);
-        assert ingressPkt.type \in {INSTALL_FLOW, DELETE_FLOW, FLOW_STAT_REQ};
+        assert ingressPkt.type \in {INSTALL_FLOW, DELETE_FLOW, CLEAR_TCAM};
         controller2Switch[self[2]] := Tail(controller2Switch[self[2]]);
         if ingressPkt.type = INSTALL_FLOW then
             installToTCAM(ingressPkt.flow);
             sendConfirmation(ingressPkt.from, ingressPkt.flow, INSTALLED_SUCCESSFULLY);
         elsif ingressPkt.type = DELETE_FLOW then
             removeFromTCAM(ingressPkt.flow);
-            \* TODO: Should we just send all updates for EH through MS?
             sendConfirmation(ingressPkt.from, ingressPkt.flow, DELETED_SUCCESSFULLY);
         elsif ingressPkt.type = CLEAR_TCAM then
             clearTCAM();
-            sendConfirmation(ingressPkt.from, ingressPkt.flow, CLEARED_TCAM_SUCCESSFULLY);
-        elsif ingressPkt.type = FLOW_STAT_REQ then
-            if ingressPkt.flow = ALL_FLOW then
-                sendFlowStatReplyAllEntries(ingressPkt.from);
-            elsif existMatchingEntryTCAM(self[2], ingressPkt.flow) then
-                sendFlowStatReplyEntryFound(ingressPkt.from, ingressPkt.flow);
-            else
-                sendFlowStatReplyNotFound(ingressPkt.from, ingressPkt.flow);
-            end if;             
+            sendClearConfirmation();
         end if;
         releaseLock(self);
     end while;
@@ -423,7 +398,7 @@ EXTENDS Integers, Sequences, FiniteSets, TLC, eval_constants, switch_constants
     (*******************************************************************)
     
     fair process swNicAsicProcPacketIn \in ({NIC_ASIC_IN} \X SW)
-    variables ingressIR = [type |-> 0]
+    variables ingressIR = NADIR_NULL
     begin
     SwitchRcvPacket:
     while TRUE do
@@ -431,7 +406,7 @@ EXTENDS Integers, Sequences, FiniteSets, TLC, eval_constants, switch_constants
         await swCanReceivePackets(self[2]);
         await Len(controller2Switch[self[2]]) > 0;
         ingressIR := Head(controller2Switch[self[2]]);
-        assert ingressIR.type \in {INSTALL_FLOW, DELETE_FLOW, FLOW_STAT_REQ};
+        assert ingressIR.type \in {INSTALL_FLOW, DELETE_FLOW, CLEAR_TCAM};
         switchAcquireLock();
         controller2Switch[self[2]] := Tail(controller2Switch[self[2]]);
 
@@ -440,14 +415,13 @@ EXTENDS Integers, Sequences, FiniteSets, TLC, eval_constants, switch_constants
                 acquireAndChangeLock(<<OFA_IN, self[2]>>);
                 NicAsic2OfaBuff[self[2]] := Append(NicAsic2OfaBuff[self[2]], ingressIR); 
             else
-                ingressIR := [type |-> 0];
                 goto SwitchRcvPacket;
             end if;
     end while;
     end process
     
     fair process swNicAsicProcPacketOut \in ({NIC_ASIC_OUT} \X SW)
-    variables egressMsg = [type |-> 0]
+    variables egressMsg = NADIR_NULL
     begin
     SwitchFromOFAPacket:
     while TRUE do
@@ -457,7 +431,7 @@ EXTENDS Integers, Sequences, FiniteSets, TLC, eval_constants, switch_constants
         switchAcquireLock();
         assert egressMsg.type \in {INSTALLED_SUCCESSFULLY, 
                                    DELETED_SUCCESSFULLY,
-                                   FLOW_STAT_REPLY};
+                                   CLEARED_TCAM_SUCCESSFULLY};
         Ofa2NicAsicBuff[self[2]] := Tail(Ofa2NicAsicBuff[self[2]]);
 
         SwitchNicAsicSendOutMsg:
@@ -466,14 +440,13 @@ EXTENDS Integers, Sequences, FiniteSets, TLC, eval_constants, switch_constants
                 releaseLock(self);
                 switch2Controller := Append(switch2Controller, egressMsg);
             else
-                egressMsg := [type |-> 0];
                 goto SwitchFromOFAPacket;
             end if;
     end while;
     end process
     
     fair process ofaModuleProcPacketIn \in ({OFA_IN} \X SW)
-    variables ofaInMsg = [type |-> 0]
+    variables ofaInMsg = NADIR_NULL
     begin
     SwitchOfaProcIn: 
     while TRUE do
@@ -482,41 +455,24 @@ EXTENDS Integers, Sequences, FiniteSets, TLC, eval_constants, switch_constants
         switchAcquireLock();
         ofaInMsg := Head(NicAsic2OfaBuff[self[2]]);           
         assert ofaInMsg.to = self[2];
-        assert \/ /\ ofaInMsg.type \in {INSTALL_FLOW, DELETE_FLOW}
-                  /\ ofaInMsg.flow  \in 1..MaxNumFlows
-               \/ /\ ofaInMsg.type = FLOW_STAT_REQ
-                  /\ \/ ofaInMsg.flow = ALL_FLOW
-                     \/ ofaInMsg.flow \in 1..MaxNumFlows;
+        assert ofaInMsg.type \in {INSTALL_FLOW, DELETE_FLOW, CLEAR_TCAM};
         
         NicAsic2OfaBuff[self[2]] := Tail(NicAsic2OfaBuff[self[2]]);
 
         SwitchOfaProcessPacket:
            if swOFACanProcessIRs(self[2]) then
                 acquireAndChangeLock(<<INSTALLER, self[2]>>);
-                if ofaInMsg.type \in {INSTALL_FLOW, DELETE_FLOW} then
-                    Ofa2InstallerBuff[self[2]] := Append(Ofa2InstallerBuff[self[2]], [type |-> ofaInMsg.type, 
-                                                                                      flow |-> ofaInMsg.flow,
-                                                                                      from |-> ofaInMsg.from]);
-                elsif ofaInMsg.type = FLOW_STAT_REQ then
-                    assert \/ ofaInMsg.flow = ALL_FLOW 
-                           \/ ofaInMsg.flow \in 1..MaxNumFlows;
-                    if ofaInMsg.flow = ALL_FLOW then
-                        sendFlowStatReplyAllEntries(ofaInMsg.from);
-                    elsif existMatchingEntryTCAM(self[2], ofaInMsg.flow) then
-                        sendFlowStatReplyEntryFound(ofaInMsg.from, ofaInMsg.flow);
-                    else
-                        sendFlowStatReplyNotFound(ofaInMsg.from, ofaInMsg.flow);
-                    end if;
-                end if;
+                Ofa2InstallerBuff[self[2]] := Append(Ofa2InstallerBuff[self[2]], [type |-> ofaInMsg.type, 
+                                                                                    flow |-> ofaInMsg.flow,
+                                                                                    from |-> ofaInMsg.from]);
            else
-                ofaInMsg := [type |-> 0];
                 goto SwitchOfaProcIn;
            end if;
     end while    
     end process
     
     fair process ofaModuleProcPacketOut \in ({OFA_OUT} \X SW)
-    variables ofaOutConfirmation = 0
+    variables ofaOutConfirmation = NADIR_NULL
     begin
     SwitchOfaProcOut:
     while TRUE do
@@ -525,26 +481,26 @@ EXTENDS Integers, Sequences, FiniteSets, TLC, eval_constants, switch_constants
         switchAcquireLock();
         ofaOutConfirmation := Head(Installer2OfaBuff[self[2]]);
         Installer2OfaBuff[self[2]] := Tail(Installer2OfaBuff[self[2]]);
-        assert ofaOutConfirmation.flow \in 1..MaxNumFlows;
-        assert ofaOutConfirmation.type \in {INSTALL_FLOW, DELETE_FLOW};
+        assert ofaOutConfirmation.type \in {INSTALL_FLOW, DELETE_FLOW, CLEAR_TCAM};
 
         SendInstallationConfirmation:
             if swOFACanProcessIRs(self[2]) then
                 acquireAndChangeLock(<<NIC_ASIC_OUT, self[2]>>);
                 if ofaOutConfirmation.type = INSTALL_FLOW then
                     sendConfirmation(ofaOutConfirmation.from, ofaOutConfirmation.flow, INSTALLED_SUCCESSFULLY); 
-                else
+                elsif ofaOutConfirmation.type = DELETE_FLOW then
                     sendConfirmation(ofaOutConfirmation.from, ofaOutConfirmation.flow, DELETED_SUCCESSFULLY); 
-                end if;         
+                else
+                    sendClearConfirmation();
+                end if;
             else 
-                ofaOutConfirmation := 0;
                 goto SwitchOfaProcOut;
             end if;                                                              
     end while;                                                                      
     end process
 
     fair process installerModuleProc \in ({INSTALLER} \X SW)
-    variables installerInIR = 0
+    variables installerInIR = NADIR_NULL
     begin
     SwitchInstallerProc: 
     while TRUE do     
@@ -552,8 +508,7 @@ EXTENDS Integers, Sequences, FiniteSets, TLC, eval_constants, switch_constants
        await Len(Ofa2InstallerBuff[self[2]]) > 0;
        switchAcquireLock();
        installerInIR := Head(Ofa2InstallerBuff[self[2]]);
-       assert installerInIR.flow \in 1..MaxNumFlows;
-       assert installerInIR.type \in {INSTALL_FLOW, DELETE_FLOW};
+       assert installerInIR.type \in {INSTALL_FLOW, DELETE_FLOW, CLEAR_TCAM};
        
        Ofa2InstallerBuff[self[2]] := Tail(Ofa2InstallerBuff[self[2]]);
 
@@ -562,11 +517,12 @@ EXTENDS Integers, Sequences, FiniteSets, TLC, eval_constants, switch_constants
                 switchAcquireLock();
                 if installerInIR.type = INSTALL_FLOW then    
                     installToTCAM(installerInIR.flow);
-                else
+                elsif installerInIR.type = DELETE_FLOW then
                     removeFromTCAM(installerInIR.flow);
+                else
+                    clearTCAM();
                 end if; 
             else
-                installerInIR := 0;
                 goto SwitchInstallerProc;
             end if;
 
@@ -575,14 +531,13 @@ EXTENDS Integers, Sequences, FiniteSets, TLC, eval_constants, switch_constants
                 acquireAndChangeLock(<<OFA_OUT, self[2]>>);
                 Installer2OfaBuff[self[2]] := Append(Installer2OfaBuff[self[2]], installerInIR);
             else
-                installerInIR := 0;
                 goto SwitchInstallerProc;
             end if;
     end while;
     end process
 
     fair process swFailureProc \in ({SW_FAILURE_PROC} \X SW)
-    variable statusMsg = <<>>, notFailedSet = {}, failedElem = "", obj = [type |-> 0];
+    variable statusMsg = <<>>, notFailedSet = {}, failedElem = "", obj = NADIR_NULL;
     begin
     SwitchFailure:
     while TRUE do
@@ -594,7 +549,6 @@ EXTENDS Integers, Sequences, FiniteSets, TLC, eval_constants, switch_constants
         obj := CHOOSE x \in Head(sw_fail_ordering_var): x.sw = self[2];
         RecoveryStatus[self[2]].transient := obj.transient || RecoveryStatus[self[2]].partial := obj.partial;
         removeFromSeqSet(sw_fail_ordering_var, obj);
-        
         
         await pc[<<SW_RESOLVE_PROC, self[2]>>] = "SwitchResolveFailure";
         
@@ -622,7 +576,7 @@ EXTENDS Integers, Sequences, FiniteSets, TLC, eval_constants, switch_constants
     end process
 
     fair process swResolveFailure \in ({SW_RESOLVE_PROC} \X SW)
-    variable failedSet = {}, statusResolveMsg = <<>>, recoveredElem = "";
+    variable failedSet = {}, statusResolveMsg = NADIR_NULL, recoveredElem = NADIR_NULL;
     begin
     SwitchResolveFailure:
     while TRUE do
@@ -683,15 +637,13 @@ EXTENDS Integers, Sequences, FiniteSets, TLC, eval_constants, switch_constants
     end while
     end process
 end algorithm*)
-\* BEGIN TRANSLATION (chksum(pcal) = "b76aa908" /\ chksum(tla) = "c1cc6a1c")
-VARIABLES switchLock, controllerLock, sw_fail_ordering_var, SwProcSet, 
-          swSeqChangedStatus, controller2Switch, switch2Controller, 
-          switchStatus, installedIRs, NicAsic2OfaBuff, Ofa2NicAsicBuff, 
-          Installer2OfaBuff, Ofa2InstallerBuff, TCAM, controlMsgCounter, 
-          RecoveryStatus, pc
+\* BEGIN TRANSLATION (chksum(pcal) = "52b1be07" /\ chksum(tla) = "4c85fed")
+VARIABLES switchLock, controllerLock, sw_fail_ordering_var, controller2Switch, 
+          switch2Controller, switchStatus, installedIRs, NicAsic2OfaBuff, 
+          Ofa2NicAsicBuff, Installer2OfaBuff, Ofa2InstallerBuff, TCAM, 
+          controlMsgCounter, RecoveryStatus, pc
 
 (* define statement *)
-indexInSeq(seq, val) == CHOOSE i \in DOMAIN seq: seq[i] = val
 removeFromSeq(inSeq, RID) == [j \in 1..(Len(inSeq) - 1) |-> IF j < RID THEN inSeq[j]
                                                             ELSE inSeq[j+1]]
 
@@ -699,7 +651,7 @@ swCanReceivePackets(sw) == switchStatus[sw].nicAsic = NotFailed
 swOFACanProcessIRs(sw) == /\ switchStatus[sw].cpu = NotFailed
                           /\ switchStatus[sw].ofa = NotFailed
 
-existMatchingEntryTCAM(swID, flowID) == \E x \in rangeSeq(TCAM[swID]): x = flowID
+existMatchingEntryTCAM(swID, flowID) == flowID \in TCAM[swID]
 swCanInstallIRs(sw) == /\ switchStatus[sw].installer = NotFailed
                        /\ switchStatus[sw].cpu = NotFailed
 
@@ -728,13 +680,13 @@ VARIABLES ingressPkt, ingressIR, egressMsg, ofaInMsg, ofaOutConfirmation,
           installerInIR, statusMsg, notFailedSet, failedElem, obj, failedSet, 
           statusResolveMsg, recoveredElem
 
-vars == << switchLock, controllerLock, sw_fail_ordering_var, SwProcSet, 
-           swSeqChangedStatus, controller2Switch, switch2Controller, 
-           switchStatus, installedIRs, NicAsic2OfaBuff, Ofa2NicAsicBuff, 
-           Installer2OfaBuff, Ofa2InstallerBuff, TCAM, controlMsgCounter, 
-           RecoveryStatus, pc, ingressPkt, ingressIR, egressMsg, ofaInMsg, 
-           ofaOutConfirmation, installerInIR, statusMsg, notFailedSet, 
-           failedElem, obj, failedSet, statusResolveMsg, recoveredElem >>
+vars == << switchLock, controllerLock, sw_fail_ordering_var, 
+           controller2Switch, switch2Controller, switchStatus, installedIRs, 
+           NicAsic2OfaBuff, Ofa2NicAsicBuff, Installer2OfaBuff, 
+           Ofa2InstallerBuff, TCAM, controlMsgCounter, RecoveryStatus, pc, 
+           ingressPkt, ingressIR, egressMsg, ofaInMsg, ofaOutConfirmation, 
+           installerInIR, statusMsg, notFailedSet, failedElem, obj, failedSet, 
+           statusResolveMsg, recoveredElem >>
 
 ProcSet == (({SW_SIMPLE_ID} \X SW)) \cup (({NIC_ASIC_IN} \X SW)) \cup (({NIC_ASIC_OUT} \X SW)) \cup (({OFA_IN} \X SW)) \cup (({OFA_OUT} \X SW)) \cup (({INSTALLER} \X SW)) \cup (({SW_FAILURE_PROC} \X SW)) \cup (({SW_RESOLVE_PROC} \X SW)) \cup (({GHOST_UNLOCK_PROC} \X SW))
 
@@ -742,14 +694,6 @@ Init == (* Global variables *)
         /\ switchLock = <<NO_LOCK, NO_LOCK>>
         /\ controllerLock = <<NO_LOCK, NO_LOCK>>
         /\ sw_fail_ordering_var = SW_FAIL_ORDERING
-        /\ SwProcSet = ((({NIC_ASIC_IN} \X SW)) \cup
-                        (({NIC_ASIC_OUT} \X SW)) \cup
-                        (({OFA_IN} \X SW)) \cup
-                        (({OFA_OUT} \X SW)) \cup
-                        (({INSTALLER} \X SW)) \cup
-                        (({SW_FAILURE_PROC} \X SW)) \cup
-                        (({SW_RESOLVE_PROC} \X SW)))
-        /\ swSeqChangedStatus = <<>>
         /\ controller2Switch = [x \in SW |-> <<>>]
         /\ switch2Controller = <<>>
         /\ switchStatus =                [
@@ -765,30 +709,30 @@ Init == (* Global variables *)
         /\ Ofa2NicAsicBuff = [x \in SW |-> <<>>]
         /\ Installer2OfaBuff = [x \in SW |-> <<>>]
         /\ Ofa2InstallerBuff = [x \in SW |-> <<>>]
-        /\ TCAM = [x \in SW |-> <<>>]
+        /\ TCAM = [x \in SW |-> {}]
         /\ controlMsgCounter = [x \in SW |-> 0]
         /\ RecoveryStatus = [x \in SW |-> [transient |-> 0, partial |-> 0]]
         (* Process swProcess *)
-        /\ ingressPkt = [self \in ({SW_SIMPLE_ID} \X SW) |-> [type |-> 0]]
+        /\ ingressPkt = [self \in ({SW_SIMPLE_ID} \X SW) |-> NADIR_NULL]
         (* Process swNicAsicProcPacketIn *)
-        /\ ingressIR = [self \in ({NIC_ASIC_IN} \X SW) |-> [type |-> 0]]
+        /\ ingressIR = [self \in ({NIC_ASIC_IN} \X SW) |-> NADIR_NULL]
         (* Process swNicAsicProcPacketOut *)
-        /\ egressMsg = [self \in ({NIC_ASIC_OUT} \X SW) |-> [type |-> 0]]
+        /\ egressMsg = [self \in ({NIC_ASIC_OUT} \X SW) |-> NADIR_NULL]
         (* Process ofaModuleProcPacketIn *)
-        /\ ofaInMsg = [self \in ({OFA_IN} \X SW) |-> [type |-> 0]]
+        /\ ofaInMsg = [self \in ({OFA_IN} \X SW) |-> NADIR_NULL]
         (* Process ofaModuleProcPacketOut *)
-        /\ ofaOutConfirmation = [self \in ({OFA_OUT} \X SW) |-> 0]
+        /\ ofaOutConfirmation = [self \in ({OFA_OUT} \X SW) |-> NADIR_NULL]
         (* Process installerModuleProc *)
-        /\ installerInIR = [self \in ({INSTALLER} \X SW) |-> 0]
+        /\ installerInIR = [self \in ({INSTALLER} \X SW) |-> NADIR_NULL]
         (* Process swFailureProc *)
         /\ statusMsg = [self \in ({SW_FAILURE_PROC} \X SW) |-> <<>>]
         /\ notFailedSet = [self \in ({SW_FAILURE_PROC} \X SW) |-> {}]
         /\ failedElem = [self \in ({SW_FAILURE_PROC} \X SW) |-> ""]
-        /\ obj = [self \in ({SW_FAILURE_PROC} \X SW) |-> [type |-> 0]]
+        /\ obj = [self \in ({SW_FAILURE_PROC} \X SW) |-> NADIR_NULL]
         (* Process swResolveFailure *)
         /\ failedSet = [self \in ({SW_RESOLVE_PROC} \X SW) |-> {}]
-        /\ statusResolveMsg = [self \in ({SW_RESOLVE_PROC} \X SW) |-> <<>>]
-        /\ recoveredElem = [self \in ({SW_RESOLVE_PROC} \X SW) |-> ""]
+        /\ statusResolveMsg = [self \in ({SW_RESOLVE_PROC} \X SW) |-> NADIR_NULL]
+        /\ recoveredElem = [self \in ({SW_RESOLVE_PROC} \X SW) |-> NADIR_NULL]
         /\ pc = [self \in ProcSet |-> CASE self \in ({SW_SIMPLE_ID} \X SW) -> "SwitchSimpleProcess"
                                         [] self \in ({NIC_ASIC_IN} \X SW) -> "SwitchRcvPacket"
                                         [] self \in ({NIC_ASIC_OUT} \X SW) -> "SwitchFromOFAPacket"
@@ -806,12 +750,12 @@ SwitchSimpleProcess(self) == /\ pc[self] = "SwitchSimpleProcess"
                              /\ controllerLock = <<NO_LOCK, NO_LOCK>>
                              /\ switchLock \in {<<NO_LOCK, NO_LOCK>>, self}
                              /\ ingressPkt' = [ingressPkt EXCEPT ![self] = Head(controller2Switch[self[2]])]
-                             /\ Assert(ingressPkt'[self].type \in {INSTALL_FLOW, DELETE_FLOW, FLOW_STAT_REQ}, 
-                                       "Failure of assertion at line 396, column 9.")
+                             /\ Assert(ingressPkt'[self].type \in {INSTALL_FLOW, DELETE_FLOW, CLEAR_TCAM}, 
+                                       "Failure of assertion at line 380, column 9.")
                              /\ controller2Switch' = [controller2Switch EXCEPT ![self[2]] = Tail(controller2Switch[self[2]])]
                              /\ IF ingressPkt'[self].type = INSTALL_FLOW
                                    THEN /\ installedIRs' = Append(installedIRs, (ingressPkt'[self].flow))
-                                        /\ TCAM' = [TCAM EXCEPT ![self[2]] = Append(TCAM[self[2]], (ingressPkt'[self].flow))]
+                                        /\ TCAM' = [TCAM EXCEPT ![self[2]] = TCAM[self[2]] \cup {(ingressPkt'[self].flow)}]
                                         /\ IF WHICH_SWITCH_MODEL[self[2]] = SW_SIMPLE_MODEL
                                               THEN /\ switch2Controller' = Append(switch2Controller, (           [
                                                                                type |-> INSTALLED_SUCCESSFULLY,
@@ -827,11 +771,9 @@ SwitchSimpleProcess(self) == /\ pc[self] = "SwitchSimpleProcess"
                                                                                                                   flow |-> (ingressPkt'[self].flow)
                                                                                                               ]))]
                                                    /\ UNCHANGED switch2Controller
+                                        /\ UNCHANGED controlMsgCounter
                                    ELSE /\ IF ingressPkt'[self].type = DELETE_FLOW
-                                              THEN /\ IF (ingressPkt'[self].flow) \in rangeSeq(TCAM[self[2]])
-                                                         THEN /\ TCAM' = [TCAM EXCEPT ![self[2]] = removeFromSeq(TCAM[self[2]], indexInSeq(TCAM[self[2]], (ingressPkt'[self].flow)))]
-                                                         ELSE /\ TRUE
-                                                              /\ TCAM' = TCAM
+                                              THEN /\ TCAM' = [TCAM EXCEPT ![self[2]] = (TCAM[self[2]] \ {(ingressPkt'[self].flow)})]
                                                    /\ IF WHICH_SWITCH_MODEL[self[2]] = SW_SIMPLE_MODEL
                                                          THEN /\ switch2Controller' = Append(switch2Controller, (           [
                                                                                           type |-> DELETED_SUCCESSFULLY,
@@ -847,88 +789,47 @@ SwitchSimpleProcess(self) == /\ pc[self] = "SwitchSimpleProcess"
                                                                                                                              flow |-> (ingressPkt'[self].flow)
                                                                                                                          ]))]
                                                               /\ UNCHANGED switch2Controller
+                                                   /\ UNCHANGED controlMsgCounter
                                               ELSE /\ IF ingressPkt'[self].type = CLEAR_TCAM
-                                                         THEN /\ TCAM' = [TCAM EXCEPT ![self[2]] = <<>>]
+                                                         THEN /\ TCAM' = [TCAM EXCEPT ![self[2]] = {}]
+                                                              /\ controlMsgCounter' = [controlMsgCounter EXCEPT ![self[2]] = controlMsgCounter[self[2]] + 1]
                                                               /\ IF WHICH_SWITCH_MODEL[self[2]] = SW_SIMPLE_MODEL
-                                                                    THEN /\ switch2Controller' = Append(switch2Controller, (           [
-                                                                                                     type |-> CLEARED_TCAM_SUCCESSFULLY,
-                                                                                                     from |-> self[2],
-                                                                                                     to |-> (ingressPkt'[self].from),
-                                                                                                     flow |-> (ingressPkt'[self].flow)
-                                                                                                 ]))
+                                                                    THEN /\ switch2Controller' =                      Append(
+                                                                                                     switch2Controller,
+                                                                                                     [
+                                                                                                         type |-> CLEARED_TCAM_SUCCESSFULLY,
+                                                                                                         swID |-> self[2],
+                                                                                                         num |-> controlMsgCounter'[self[2]],
+                                                                                                         installerStatus |-> getInstallerStatus(switchStatus[self[2]].installer)
+                                                                                                     ]
+                                                                                                 )
                                                                          /\ UNCHANGED Ofa2NicAsicBuff
-                                                                    ELSE /\ Ofa2NicAsicBuff' = [Ofa2NicAsicBuff EXCEPT ![self[2]] = Append(Ofa2NicAsicBuff[self[2]], (           [
-                                                                                                                                        type |-> CLEARED_TCAM_SUCCESSFULLY,
-                                                                                                                                        from |-> self[2],
-                                                                                                                                        to |-> (ingressPkt'[self].from),
-                                                                                                                                        flow |-> (ingressPkt'[self].flow)
-                                                                                                                                    ]))]
+                                                                    ELSE /\ Ofa2NicAsicBuff' = [Ofa2NicAsicBuff EXCEPT ![self[2]] =                             Append(
+                                                                                                                                        Ofa2NicAsicBuff[self[2]],
+                                                                                                                                        [
+                                                                                                                                            type |-> CLEARED_TCAM_SUCCESSFULLY,
+                                                                                                                                            swID |-> self[2],
+                                                                                                                                            num |-> controlMsgCounter'[self[2]],
+                                                                                                                                            installerStatus |-> getInstallerStatus(switchStatus[self[2]].installer)
+                                                                                                                                        ]
+                                                                                                                                    )]
                                                                          /\ UNCHANGED switch2Controller
-                                                         ELSE /\ IF ingressPkt'[self].type = FLOW_STAT_REQ
-                                                                    THEN /\ IF ingressPkt'[self].flow = ALL_FLOW
-                                                                               THEN /\ IF WHICH_SWITCH_MODEL[self[2]] = SW_SIMPLE_MODEL
-                                                                                          THEN /\ switch2Controller' = Append(switch2Controller, (           [
-                                                                                                                           type |-> FLOW_STAT_REPLY,
-                                                                                                                           from |-> self[2],
-                                                                                                                           to |-> (ingressPkt'[self].from),
-                                                                                                                           flows |-> rangeSeq(TCAM[self[2]])
-                                                                                                                       ]))
-                                                                                               /\ UNCHANGED Ofa2NicAsicBuff
-                                                                                          ELSE /\ Ofa2NicAsicBuff' = [Ofa2NicAsicBuff EXCEPT ![self[2]] = Append(Ofa2NicAsicBuff[self[2]], (           [
-                                                                                                                                                              type |-> FLOW_STAT_REPLY,
-                                                                                                                                                              from |-> self[2],
-                                                                                                                                                              to |-> (ingressPkt'[self].from),
-                                                                                                                                                              flows |-> rangeSeq(TCAM[self[2]])
-                                                                                                                                                          ]))]
-                                                                                               /\ UNCHANGED switch2Controller
-                                                                               ELSE /\ IF existMatchingEntryTCAM(self[2], ingressPkt'[self].flow)
-                                                                                          THEN /\ IF WHICH_SWITCH_MODEL[self[2]] = SW_SIMPLE_MODEL
-                                                                                                     THEN /\ switch2Controller' = Append(switch2Controller, (           [
-                                                                                                                                      type |-> FLOW_STAT_REPLY,
-                                                                                                                                      from |-> self[2],
-                                                                                                                                      to |-> (ingressPkt'[self].from),
-                                                                                                                                      status |-> ENTRY_FOUND
-                                                                                                                                  ]))
-                                                                                                          /\ UNCHANGED Ofa2NicAsicBuff
-                                                                                                     ELSE /\ Ofa2NicAsicBuff' = [Ofa2NicAsicBuff EXCEPT ![self[2]] = Append(Ofa2NicAsicBuff[self[2]], (           [
-                                                                                                                                                                         type |-> FLOW_STAT_REPLY,
-                                                                                                                                                                         from |-> self[2],
-                                                                                                                                                                         to |-> (ingressPkt'[self].from),
-                                                                                                                                                                         status |-> ENTRY_FOUND
-                                                                                                                                                                     ]))]
-                                                                                                          /\ UNCHANGED switch2Controller
-                                                                                          ELSE /\ IF WHICH_SWITCH_MODEL[self[2]] = SW_SIMPLE_MODEL
-                                                                                                     THEN /\ switch2Controller' = Append(switch2Controller, (           [
-                                                                                                                                      type |-> FLOW_STAT_REPLY,
-                                                                                                                                      from |-> self[2],
-                                                                                                                                      to |-> (ingressPkt'[self].from),
-                                                                                                                                      status |-> NO_ENTRY
-                                                                                                                                  ]))
-                                                                                                          /\ UNCHANGED Ofa2NicAsicBuff
-                                                                                                     ELSE /\ Ofa2NicAsicBuff' = [Ofa2NicAsicBuff EXCEPT ![self[2]] = Append(Ofa2NicAsicBuff[self[2]], (           [
-                                                                                                                                                                         type |-> FLOW_STAT_REPLY,
-                                                                                                                                                                         from |-> self[2],
-                                                                                                                                                                         to |-> (ingressPkt'[self].from),
-                                                                                                                                                                         status |-> NO_ENTRY
-                                                                                                                                                                     ]))]
-                                                                                                          /\ UNCHANGED switch2Controller
-                                                                    ELSE /\ TRUE
-                                                                         /\ UNCHANGED << switch2Controller, 
-                                                                                         Ofa2NicAsicBuff >>
-                                                              /\ TCAM' = TCAM
+                                                         ELSE /\ TRUE
+                                                              /\ UNCHANGED << switch2Controller, 
+                                                                              Ofa2NicAsicBuff, 
+                                                                              TCAM, 
+                                                                              controlMsgCounter >>
                                         /\ UNCHANGED installedIRs
                              /\ Assert(\/ switchLock[2] = self[2]
                                        \/ switchLock[2] = NO_LOCK, 
-                                       "Failure of assertion at line 377, column 9 of macro called at line 416, column 9.")
+                                       "Failure of assertion at line 361, column 9 of macro called at line 392, column 9.")
                              /\ switchLock' = <<NO_LOCK, NO_LOCK>>
                              /\ pc' = [pc EXCEPT ![self] = "SwitchSimpleProcess"]
                              /\ UNCHANGED << controllerLock, 
-                                             sw_fail_ordering_var, SwProcSet, 
-                                             swSeqChangedStatus, switchStatus, 
-                                             NicAsic2OfaBuff, 
+                                             sw_fail_ordering_var, 
+                                             switchStatus, NicAsic2OfaBuff, 
                                              Installer2OfaBuff, 
-                                             Ofa2InstallerBuff, 
-                                             controlMsgCounter, RecoveryStatus, 
+                                             Ofa2InstallerBuff, RecoveryStatus, 
                                              ingressIR, egressMsg, ofaInMsg, 
                                              ofaOutConfirmation, installerInIR, 
                                              statusMsg, notFailedSet, 
@@ -942,15 +843,14 @@ SwitchRcvPacket(self) == /\ pc[self] = "SwitchRcvPacket"
                          /\ swCanReceivePackets(self[2])
                          /\ Len(controller2Switch[self[2]]) > 0
                          /\ ingressIR' = [ingressIR EXCEPT ![self] = Head(controller2Switch[self[2]])]
-                         /\ Assert(ingressIR'[self].type \in {INSTALL_FLOW, DELETE_FLOW, FLOW_STAT_REQ}, 
-                                   "Failure of assertion at line 433, column 9.")
+                         /\ Assert(ingressIR'[self].type \in {INSTALL_FLOW, DELETE_FLOW, CLEAR_TCAM}, 
+                                   "Failure of assertion at line 409, column 9.")
                          /\ controllerLock = <<NO_LOCK, NO_LOCK>>
                          /\ switchLock \in {<<NO_LOCK, NO_LOCK>>, self}
                          /\ switchLock' = self
                          /\ controller2Switch' = [controller2Switch EXCEPT ![self[2]] = Tail(controller2Switch[self[2]])]
                          /\ pc' = [pc EXCEPT ![self] = "SwitchNicAsicInsertToOfaBuff"]
                          /\ UNCHANGED << controllerLock, sw_fail_ordering_var, 
-                                         SwProcSet, swSeqChangedStatus, 
                                          switch2Controller, switchStatus, 
                                          installedIRs, NicAsic2OfaBuff, 
                                          Ofa2NicAsicBuff, Installer2OfaBuff, 
@@ -969,15 +869,11 @@ SwitchNicAsicInsertToOfaBuff(self) == /\ pc[self] = "SwitchNicAsicInsertToOfaBuf
                                                  /\ switchLock' = <<OFA_IN, self[2]>>
                                                  /\ NicAsic2OfaBuff' = [NicAsic2OfaBuff EXCEPT ![self[2]] = Append(NicAsic2OfaBuff[self[2]], ingressIR[self])]
                                                  /\ pc' = [pc EXCEPT ![self] = "SwitchRcvPacket"]
-                                                 /\ UNCHANGED ingressIR
-                                            ELSE /\ ingressIR' = [ingressIR EXCEPT ![self] = [type |-> 0]]
-                                                 /\ pc' = [pc EXCEPT ![self] = "SwitchRcvPacket"]
+                                            ELSE /\ pc' = [pc EXCEPT ![self] = "SwitchRcvPacket"]
                                                  /\ UNCHANGED << switchLock, 
                                                                  NicAsic2OfaBuff >>
                                       /\ UNCHANGED << controllerLock, 
                                                       sw_fail_ordering_var, 
-                                                      SwProcSet, 
-                                                      swSeqChangedStatus, 
                                                       controller2Switch, 
                                                       switch2Controller, 
                                                       switchStatus, 
@@ -987,8 +883,8 @@ SwitchNicAsicInsertToOfaBuff(self) == /\ pc[self] = "SwitchNicAsicInsertToOfaBuf
                                                       Ofa2InstallerBuff, TCAM, 
                                                       controlMsgCounter, 
                                                       RecoveryStatus, 
-                                                      ingressPkt, egressMsg, 
-                                                      ofaInMsg, 
+                                                      ingressPkt, ingressIR, 
+                                                      egressMsg, ofaInMsg, 
                                                       ofaOutConfirmation, 
                                                       installerInIR, statusMsg, 
                                                       notFailedSet, failedElem, 
@@ -1008,13 +904,12 @@ SwitchFromOFAPacket(self) == /\ pc[self] = "SwitchFromOFAPacket"
                              /\ switchLock' = self
                              /\ Assert(egressMsg'[self].type \in {INSTALLED_SUCCESSFULLY,
                                                                   DELETED_SUCCESSFULLY,
-                                                                  FLOW_STAT_REPLY}, 
-                                       "Failure of assertion at line 457, column 9.")
+                                                                  CLEARED_TCAM_SUCCESSFULLY}, 
+                                       "Failure of assertion at line 432, column 9.")
                              /\ Ofa2NicAsicBuff' = [Ofa2NicAsicBuff EXCEPT ![self[2]] = Tail(Ofa2NicAsicBuff[self[2]])]
                              /\ pc' = [pc EXCEPT ![self] = "SwitchNicAsicSendOutMsg"]
                              /\ UNCHANGED << controllerLock, 
-                                             sw_fail_ordering_var, SwProcSet, 
-                                             swSeqChangedStatus, 
+                                             sw_fail_ordering_var, 
                                              controller2Switch, 
                                              switch2Controller, switchStatus, 
                                              installedIRs, NicAsic2OfaBuff, 
@@ -1033,18 +928,15 @@ SwitchNicAsicSendOutMsg(self) == /\ pc[self] = "SwitchNicAsicSendOutMsg"
                                             /\ switchLock \in {<<NO_LOCK, NO_LOCK>>, self}
                                             /\ Assert(\/ switchLock[2] = self[2]
                                                       \/ switchLock[2] = NO_LOCK, 
-                                                      "Failure of assertion at line 377, column 9 of macro called at line 465, column 17.")
+                                                      "Failure of assertion at line 361, column 9 of macro called at line 440, column 17.")
                                             /\ switchLock' = <<NO_LOCK, NO_LOCK>>
                                             /\ switch2Controller' = Append(switch2Controller, egressMsg[self])
                                             /\ pc' = [pc EXCEPT ![self] = "SwitchFromOFAPacket"]
-                                            /\ UNCHANGED egressMsg
-                                       ELSE /\ egressMsg' = [egressMsg EXCEPT ![self] = [type |-> 0]]
-                                            /\ pc' = [pc EXCEPT ![self] = "SwitchFromOFAPacket"]
+                                       ELSE /\ pc' = [pc EXCEPT ![self] = "SwitchFromOFAPacket"]
                                             /\ UNCHANGED << switchLock, 
                                                             switch2Controller >>
                                  /\ UNCHANGED << controllerLock, 
                                                  sw_fail_ordering_var, 
-                                                 SwProcSet, swSeqChangedStatus, 
                                                  controller2Switch, 
                                                  switchStatus, installedIRs, 
                                                  NicAsic2OfaBuff, 
@@ -1053,8 +945,8 @@ SwitchNicAsicSendOutMsg(self) == /\ pc[self] = "SwitchNicAsicSendOutMsg"
                                                  Ofa2InstallerBuff, TCAM, 
                                                  controlMsgCounter, 
                                                  RecoveryStatus, ingressPkt, 
-                                                 ingressIR, ofaInMsg, 
-                                                 ofaOutConfirmation, 
+                                                 ingressIR, egressMsg, 
+                                                 ofaInMsg, ofaOutConfirmation, 
                                                  installerInIR, statusMsg, 
                                                  notFailedSet, failedElem, obj, 
                                                  failedSet, statusResolveMsg, 
@@ -1071,17 +963,12 @@ SwitchOfaProcIn(self) == /\ pc[self] = "SwitchOfaProcIn"
                          /\ switchLock' = self
                          /\ ofaInMsg' = [ofaInMsg EXCEPT ![self] = Head(NicAsic2OfaBuff[self[2]])]
                          /\ Assert(ofaInMsg'[self].to = self[2], 
-                                   "Failure of assertion at line 483, column 9.")
-                         /\ Assert(\/ /\ ofaInMsg'[self].type \in {INSTALL_FLOW, DELETE_FLOW}
-                                      /\ ofaInMsg'[self].flow  \in 1..MaxNumFlows
-                                   \/ /\ ofaInMsg'[self].type = FLOW_STAT_REQ
-                                      /\ \/ ofaInMsg'[self].flow = ALL_FLOW
-                                         \/ ofaInMsg'[self].flow \in 1..MaxNumFlows, 
-                                   "Failure of assertion at line 484, column 9.")
+                                   "Failure of assertion at line 457, column 9.")
+                         /\ Assert(ofaInMsg'[self].type \in {INSTALL_FLOW, DELETE_FLOW, CLEAR_TCAM}, 
+                                   "Failure of assertion at line 458, column 9.")
                          /\ NicAsic2OfaBuff' = [NicAsic2OfaBuff EXCEPT ![self[2]] = Tail(NicAsic2OfaBuff[self[2]])]
                          /\ pc' = [pc EXCEPT ![self] = "SwitchOfaProcessPacket"]
                          /\ UNCHANGED << controllerLock, sw_fail_ordering_var, 
-                                         SwProcSet, swSeqChangedStatus, 
                                          controller2Switch, switch2Controller, 
                                          switchStatus, installedIRs, 
                                          Ofa2NicAsicBuff, Installer2OfaBuff, 
@@ -1098,85 +985,24 @@ SwitchOfaProcessPacket(self) == /\ pc[self] = "SwitchOfaProcessPacket"
                                       THEN /\ controllerLock = <<NO_LOCK, NO_LOCK>>
                                            /\ switchLock \in {<<NO_LOCK, NO_LOCK>>, self}
                                            /\ switchLock' = <<INSTALLER, self[2]>>
-                                           /\ IF ofaInMsg[self].type \in {INSTALL_FLOW, DELETE_FLOW}
-                                                 THEN /\ Ofa2InstallerBuff' = [Ofa2InstallerBuff EXCEPT ![self[2]] = Append(Ofa2InstallerBuff[self[2]], [type |-> ofaInMsg[self].type,
-                                                                                                                                                         flow |-> ofaInMsg[self].flow,
-                                                                                                                                                         from |-> ofaInMsg[self].from])]
-                                                      /\ UNCHANGED << switch2Controller, 
-                                                                      Ofa2NicAsicBuff >>
-                                                 ELSE /\ IF ofaInMsg[self].type = FLOW_STAT_REQ
-                                                            THEN /\ Assert(\/ ofaInMsg[self].flow = ALL_FLOW
-                                                                           \/ ofaInMsg[self].flow \in 1..MaxNumFlows, 
-                                                                           "Failure of assertion at line 500, column 21.")
-                                                                 /\ IF ofaInMsg[self].flow = ALL_FLOW
-                                                                       THEN /\ IF WHICH_SWITCH_MODEL[self[2]] = SW_SIMPLE_MODEL
-                                                                                  THEN /\ switch2Controller' = Append(switch2Controller, (           [
-                                                                                                                   type |-> FLOW_STAT_REPLY,
-                                                                                                                   from |-> self[2],
-                                                                                                                   to |-> (ofaInMsg[self].from),
-                                                                                                                   flows |-> rangeSeq(TCAM[self[2]])
-                                                                                                               ]))
-                                                                                       /\ UNCHANGED Ofa2NicAsicBuff
-                                                                                  ELSE /\ Ofa2NicAsicBuff' = [Ofa2NicAsicBuff EXCEPT ![self[2]] = Append(Ofa2NicAsicBuff[self[2]], (           [
-                                                                                                                                                      type |-> FLOW_STAT_REPLY,
-                                                                                                                                                      from |-> self[2],
-                                                                                                                                                      to |-> (ofaInMsg[self].from),
-                                                                                                                                                      flows |-> rangeSeq(TCAM[self[2]])
-                                                                                                                                                  ]))]
-                                                                                       /\ UNCHANGED switch2Controller
-                                                                       ELSE /\ IF existMatchingEntryTCAM(self[2], ofaInMsg[self].flow)
-                                                                                  THEN /\ IF WHICH_SWITCH_MODEL[self[2]] = SW_SIMPLE_MODEL
-                                                                                             THEN /\ switch2Controller' = Append(switch2Controller, (           [
-                                                                                                                              type |-> FLOW_STAT_REPLY,
-                                                                                                                              from |-> self[2],
-                                                                                                                              to |-> (ofaInMsg[self].from),
-                                                                                                                              status |-> ENTRY_FOUND
-                                                                                                                          ]))
-                                                                                                  /\ UNCHANGED Ofa2NicAsicBuff
-                                                                                             ELSE /\ Ofa2NicAsicBuff' = [Ofa2NicAsicBuff EXCEPT ![self[2]] = Append(Ofa2NicAsicBuff[self[2]], (           [
-                                                                                                                                                                 type |-> FLOW_STAT_REPLY,
-                                                                                                                                                                 from |-> self[2],
-                                                                                                                                                                 to |-> (ofaInMsg[self].from),
-                                                                                                                                                                 status |-> ENTRY_FOUND
-                                                                                                                                                             ]))]
-                                                                                                  /\ UNCHANGED switch2Controller
-                                                                                  ELSE /\ IF WHICH_SWITCH_MODEL[self[2]] = SW_SIMPLE_MODEL
-                                                                                             THEN /\ switch2Controller' = Append(switch2Controller, (           [
-                                                                                                                              type |-> FLOW_STAT_REPLY,
-                                                                                                                              from |-> self[2],
-                                                                                                                              to |-> (ofaInMsg[self].from),
-                                                                                                                              status |-> NO_ENTRY
-                                                                                                                          ]))
-                                                                                                  /\ UNCHANGED Ofa2NicAsicBuff
-                                                                                             ELSE /\ Ofa2NicAsicBuff' = [Ofa2NicAsicBuff EXCEPT ![self[2]] = Append(Ofa2NicAsicBuff[self[2]], (           [
-                                                                                                                                                                 type |-> FLOW_STAT_REPLY,
-                                                                                                                                                                 from |-> self[2],
-                                                                                                                                                                 to |-> (ofaInMsg[self].from),
-                                                                                                                                                                 status |-> NO_ENTRY
-                                                                                                                                                             ]))]
-                                                                                                  /\ UNCHANGED switch2Controller
-                                                            ELSE /\ TRUE
-                                                                 /\ UNCHANGED << switch2Controller, 
-                                                                                 Ofa2NicAsicBuff >>
-                                                      /\ UNCHANGED Ofa2InstallerBuff
+                                           /\ Ofa2InstallerBuff' = [Ofa2InstallerBuff EXCEPT ![self[2]] = Append(Ofa2InstallerBuff[self[2]], [type |-> ofaInMsg[self].type,
+                                                                                                                                                flow |-> ofaInMsg[self].flow,
+                                                                                                                                                from |-> ofaInMsg[self].from])]
                                            /\ pc' = [pc EXCEPT ![self] = "SwitchOfaProcIn"]
-                                           /\ UNCHANGED ofaInMsg
-                                      ELSE /\ ofaInMsg' = [ofaInMsg EXCEPT ![self] = [type |-> 0]]
-                                           /\ pc' = [pc EXCEPT ![self] = "SwitchOfaProcIn"]
+                                      ELSE /\ pc' = [pc EXCEPT ![self] = "SwitchOfaProcIn"]
                                            /\ UNCHANGED << switchLock, 
-                                                           switch2Controller, 
-                                                           Ofa2NicAsicBuff, 
                                                            Ofa2InstallerBuff >>
                                 /\ UNCHANGED << controllerLock, 
                                                 sw_fail_ordering_var, 
-                                                SwProcSet, swSeqChangedStatus, 
                                                 controller2Switch, 
+                                                switch2Controller, 
                                                 switchStatus, installedIRs, 
                                                 NicAsic2OfaBuff, 
+                                                Ofa2NicAsicBuff, 
                                                 Installer2OfaBuff, TCAM, 
                                                 controlMsgCounter, 
                                                 RecoveryStatus, ingressPkt, 
-                                                ingressIR, egressMsg, 
+                                                ingressIR, egressMsg, ofaInMsg, 
                                                 ofaOutConfirmation, 
                                                 installerInIR, statusMsg, 
                                                 notFailedSet, failedElem, obj, 
@@ -1194,13 +1020,10 @@ SwitchOfaProcOut(self) == /\ pc[self] = "SwitchOfaProcOut"
                           /\ switchLock' = self
                           /\ ofaOutConfirmation' = [ofaOutConfirmation EXCEPT ![self] = Head(Installer2OfaBuff[self[2]])]
                           /\ Installer2OfaBuff' = [Installer2OfaBuff EXCEPT ![self[2]] = Tail(Installer2OfaBuff[self[2]])]
-                          /\ Assert(ofaOutConfirmation'[self].flow \in 1..MaxNumFlows, 
-                                    "Failure of assertion at line 527, column 9.")
-                          /\ Assert(ofaOutConfirmation'[self].type \in {INSTALL_FLOW, DELETE_FLOW}, 
-                                    "Failure of assertion at line 528, column 9.")
+                          /\ Assert(ofaOutConfirmation'[self].type \in {INSTALL_FLOW, DELETE_FLOW, CLEAR_TCAM}, 
+                                    "Failure of assertion at line 484, column 9.")
                           /\ pc' = [pc EXCEPT ![self] = "SendInstallationConfirmation"]
                           /\ UNCHANGED << controllerLock, sw_fail_ordering_var, 
-                                          SwProcSet, swSeqChangedStatus, 
                                           controller2Switch, switch2Controller, 
                                           switchStatus, installedIRs, 
                                           NicAsic2OfaBuff, Ofa2NicAsicBuff, 
@@ -1233,42 +1056,64 @@ SendInstallationConfirmation(self) == /\ pc[self] = "SendInstallationConfirmatio
                                                                                                                                       flow |-> (ofaOutConfirmation[self].flow)
                                                                                                                                   ]))]
                                                                        /\ UNCHANGED switch2Controller
-                                                       ELSE /\ IF WHICH_SWITCH_MODEL[self[2]] = SW_SIMPLE_MODEL
-                                                                  THEN /\ switch2Controller' = Append(switch2Controller, (           [
-                                                                                                   type |-> DELETED_SUCCESSFULLY,
-                                                                                                   from |-> self[2],
-                                                                                                   to |-> (ofaOutConfirmation[self].from),
-                                                                                                   flow |-> (ofaOutConfirmation[self].flow)
-                                                                                               ]))
-                                                                       /\ UNCHANGED Ofa2NicAsicBuff
-                                                                  ELSE /\ Ofa2NicAsicBuff' = [Ofa2NicAsicBuff EXCEPT ![self[2]] = Append(Ofa2NicAsicBuff[self[2]], (           [
-                                                                                                                                      type |-> DELETED_SUCCESSFULLY,
-                                                                                                                                      from |-> self[2],
-                                                                                                                                      to |-> (ofaOutConfirmation[self].from),
-                                                                                                                                      flow |-> (ofaOutConfirmation[self].flow)
-                                                                                                                                  ]))]
-                                                                       /\ UNCHANGED switch2Controller
+                                                            /\ UNCHANGED controlMsgCounter
+                                                       ELSE /\ IF ofaOutConfirmation[self].type = DELETE_FLOW
+                                                                  THEN /\ IF WHICH_SWITCH_MODEL[self[2]] = SW_SIMPLE_MODEL
+                                                                             THEN /\ switch2Controller' = Append(switch2Controller, (           [
+                                                                                                              type |-> DELETED_SUCCESSFULLY,
+                                                                                                              from |-> self[2],
+                                                                                                              to |-> (ofaOutConfirmation[self].from),
+                                                                                                              flow |-> (ofaOutConfirmation[self].flow)
+                                                                                                          ]))
+                                                                                  /\ UNCHANGED Ofa2NicAsicBuff
+                                                                             ELSE /\ Ofa2NicAsicBuff' = [Ofa2NicAsicBuff EXCEPT ![self[2]] = Append(Ofa2NicAsicBuff[self[2]], (           [
+                                                                                                                                                 type |-> DELETED_SUCCESSFULLY,
+                                                                                                                                                 from |-> self[2],
+                                                                                                                                                 to |-> (ofaOutConfirmation[self].from),
+                                                                                                                                                 flow |-> (ofaOutConfirmation[self].flow)
+                                                                                                                                             ]))]
+                                                                                  /\ UNCHANGED switch2Controller
+                                                                       /\ UNCHANGED controlMsgCounter
+                                                                  ELSE /\ controlMsgCounter' = [controlMsgCounter EXCEPT ![self[2]] = controlMsgCounter[self[2]] + 1]
+                                                                       /\ IF WHICH_SWITCH_MODEL[self[2]] = SW_SIMPLE_MODEL
+                                                                             THEN /\ switch2Controller' =                      Append(
+                                                                                                              switch2Controller,
+                                                                                                              [
+                                                                                                                  type |-> CLEARED_TCAM_SUCCESSFULLY,
+                                                                                                                  swID |-> self[2],
+                                                                                                                  num |-> controlMsgCounter'[self[2]],
+                                                                                                                  installerStatus |-> getInstallerStatus(switchStatus[self[2]].installer)
+                                                                                                              ]
+                                                                                                          )
+                                                                                  /\ UNCHANGED Ofa2NicAsicBuff
+                                                                             ELSE /\ Ofa2NicAsicBuff' = [Ofa2NicAsicBuff EXCEPT ![self[2]] =                             Append(
+                                                                                                                                                 Ofa2NicAsicBuff[self[2]],
+                                                                                                                                                 [
+                                                                                                                                                     type |-> CLEARED_TCAM_SUCCESSFULLY,
+                                                                                                                                                     swID |-> self[2],
+                                                                                                                                                     num |-> controlMsgCounter'[self[2]],
+                                                                                                                                                     installerStatus |-> getInstallerStatus(switchStatus[self[2]].installer)
+                                                                                                                                                 ]
+                                                                                                                                             )]
+                                                                                  /\ UNCHANGED switch2Controller
                                                  /\ pc' = [pc EXCEPT ![self] = "SwitchOfaProcOut"]
-                                                 /\ UNCHANGED ofaOutConfirmation
-                                            ELSE /\ ofaOutConfirmation' = [ofaOutConfirmation EXCEPT ![self] = 0]
-                                                 /\ pc' = [pc EXCEPT ![self] = "SwitchOfaProcOut"]
+                                            ELSE /\ pc' = [pc EXCEPT ![self] = "SwitchOfaProcOut"]
                                                  /\ UNCHANGED << switchLock, 
                                                                  switch2Controller, 
-                                                                 Ofa2NicAsicBuff >>
+                                                                 Ofa2NicAsicBuff, 
+                                                                 controlMsgCounter >>
                                       /\ UNCHANGED << controllerLock, 
                                                       sw_fail_ordering_var, 
-                                                      SwProcSet, 
-                                                      swSeqChangedStatus, 
                                                       controller2Switch, 
                                                       switchStatus, 
                                                       installedIRs, 
                                                       NicAsic2OfaBuff, 
                                                       Installer2OfaBuff, 
                                                       Ofa2InstallerBuff, TCAM, 
-                                                      controlMsgCounter, 
                                                       RecoveryStatus, 
                                                       ingressPkt, ingressIR, 
                                                       egressMsg, ofaInMsg, 
+                                                      ofaOutConfirmation, 
                                                       installerInIR, statusMsg, 
                                                       notFailedSet, failedElem, 
                                                       obj, failedSet, 
@@ -1285,15 +1130,12 @@ SwitchInstallerProc(self) == /\ pc[self] = "SwitchInstallerProc"
                              /\ switchLock \in {<<NO_LOCK, NO_LOCK>>, self}
                              /\ switchLock' = self
                              /\ installerInIR' = [installerInIR EXCEPT ![self] = Head(Ofa2InstallerBuff[self[2]])]
-                             /\ Assert(installerInIR'[self].flow \in 1..MaxNumFlows, 
-                                       "Failure of assertion at line 554, column 8.")
-                             /\ Assert(installerInIR'[self].type \in {INSTALL_FLOW, DELETE_FLOW}, 
-                                       "Failure of assertion at line 555, column 8.")
+                             /\ Assert(installerInIR'[self].type \in {INSTALL_FLOW, DELETE_FLOW, CLEAR_TCAM}, 
+                                       "Failure of assertion at line 511, column 8.")
                              /\ Ofa2InstallerBuff' = [Ofa2InstallerBuff EXCEPT ![self[2]] = Tail(Ofa2InstallerBuff[self[2]])]
                              /\ pc' = [pc EXCEPT ![self] = "SwitchInstallerInsert2TCAM"]
                              /\ UNCHANGED << controllerLock, 
-                                             sw_fail_ordering_var, SwProcSet, 
-                                             swSeqChangedStatus, 
+                                             sw_fail_ordering_var, 
                                              controller2Switch, 
                                              switch2Controller, switchStatus, 
                                              installedIRs, NicAsic2OfaBuff, 
@@ -1313,23 +1155,18 @@ SwitchInstallerInsert2TCAM(self) == /\ pc[self] = "SwitchInstallerInsert2TCAM"
                                                /\ switchLock' = self
                                                /\ IF installerInIR[self].type = INSTALL_FLOW
                                                      THEN /\ installedIRs' = Append(installedIRs, (installerInIR[self].flow))
-                                                          /\ TCAM' = [TCAM EXCEPT ![self[2]] = Append(TCAM[self[2]], (installerInIR[self].flow))]
-                                                     ELSE /\ IF (installerInIR[self].flow) \in rangeSeq(TCAM[self[2]])
-                                                                THEN /\ TCAM' = [TCAM EXCEPT ![self[2]] = removeFromSeq(TCAM[self[2]], indexInSeq(TCAM[self[2]], (installerInIR[self].flow)))]
-                                                                ELSE /\ TRUE
-                                                                     /\ TCAM' = TCAM
+                                                          /\ TCAM' = [TCAM EXCEPT ![self[2]] = TCAM[self[2]] \cup {(installerInIR[self].flow)}]
+                                                     ELSE /\ IF installerInIR[self].type = DELETE_FLOW
+                                                                THEN /\ TCAM' = [TCAM EXCEPT ![self[2]] = (TCAM[self[2]] \ {(installerInIR[self].flow)})]
+                                                                ELSE /\ TCAM' = [TCAM EXCEPT ![self[2]] = {}]
                                                           /\ UNCHANGED installedIRs
                                                /\ pc' = [pc EXCEPT ![self] = "SwitchInstallerSendConfirmation"]
-                                               /\ UNCHANGED installerInIR
-                                          ELSE /\ installerInIR' = [installerInIR EXCEPT ![self] = 0]
-                                               /\ pc' = [pc EXCEPT ![self] = "SwitchInstallerProc"]
+                                          ELSE /\ pc' = [pc EXCEPT ![self] = "SwitchInstallerProc"]
                                                /\ UNCHANGED << switchLock, 
                                                                installedIRs, 
                                                                TCAM >>
                                     /\ UNCHANGED << controllerLock, 
                                                     sw_fail_ordering_var, 
-                                                    SwProcSet, 
-                                                    swSeqChangedStatus, 
                                                     controller2Switch, 
                                                     switch2Controller, 
                                                     switchStatus, 
@@ -1342,8 +1179,9 @@ SwitchInstallerInsert2TCAM(self) == /\ pc[self] = "SwitchInstallerInsert2TCAM"
                                                     ingressIR, egressMsg, 
                                                     ofaInMsg, 
                                                     ofaOutConfirmation, 
-                                                    statusMsg, notFailedSet, 
-                                                    failedElem, obj, failedSet, 
+                                                    installerInIR, statusMsg, 
+                                                    notFailedSet, failedElem, 
+                                                    obj, failedSet, 
                                                     statusResolveMsg, 
                                                     recoveredElem >>
 
@@ -1354,15 +1192,11 @@ SwitchInstallerSendConfirmation(self) == /\ pc[self] = "SwitchInstallerSendConfi
                                                     /\ switchLock' = <<OFA_OUT, self[2]>>
                                                     /\ Installer2OfaBuff' = [Installer2OfaBuff EXCEPT ![self[2]] = Append(Installer2OfaBuff[self[2]], installerInIR[self])]
                                                     /\ pc' = [pc EXCEPT ![self] = "SwitchInstallerProc"]
-                                                    /\ UNCHANGED installerInIR
-                                               ELSE /\ installerInIR' = [installerInIR EXCEPT ![self] = 0]
-                                                    /\ pc' = [pc EXCEPT ![self] = "SwitchInstallerProc"]
+                                               ELSE /\ pc' = [pc EXCEPT ![self] = "SwitchInstallerProc"]
                                                     /\ UNCHANGED << switchLock, 
                                                                     Installer2OfaBuff >>
                                          /\ UNCHANGED << controllerLock, 
                                                          sw_fail_ordering_var, 
-                                                         SwProcSet, 
-                                                         swSeqChangedStatus, 
                                                          controller2Switch, 
                                                          switch2Controller, 
                                                          switchStatus, 
@@ -1376,6 +1210,7 @@ SwitchInstallerSendConfirmation(self) == /\ pc[self] = "SwitchInstallerSendConfi
                                                          ingressPkt, ingressIR, 
                                                          egressMsg, ofaInMsg, 
                                                          ofaOutConfirmation, 
+                                                         installerInIR, 
                                                          statusMsg, 
                                                          notFailedSet, 
                                                          failedElem, obj, 
@@ -1397,7 +1232,7 @@ SwitchFailure(self) == /\ pc[self] = "SwitchFailure"
                        /\ RecoveryStatus' = [RecoveryStatus EXCEPT ![self[2]].transient = obj'[self].transient,
                                                                    ![self[2]].partial = obj'[self].partial]
                        /\ Assert(obj'[self] \in Head(sw_fail_ordering_var), 
-                                 "Failure of assertion at line 80, column 9 of macro called at line 595, column 9.")
+                                 "Failure of assertion at line 71, column 9 of macro called at line 551, column 9.")
                        /\ IF Cardinality(Head(sw_fail_ordering_var)) = 1
                              THEN /\ sw_fail_ordering_var' = Tail(sw_fail_ordering_var)
                              ELSE /\ sw_fail_ordering_var' = <<(Head(sw_fail_ordering_var)\{obj'[self]})>> \o Tail(sw_fail_ordering_var)
@@ -1408,9 +1243,9 @@ SwitchFailure(self) == /\ pc[self] = "SwitchFailure"
                                              /\ statusMsg' = [statusMsg EXCEPT ![self] = [type |-> NIC_ASIC_DOWN,
                                                                                             swID |-> self[2],
                                                                                             num |-> controlMsgCounter'[self[2]]]]
-                                             /\ swSeqChangedStatus' = Append(swSeqChangedStatus, statusMsg'[self])
+                                             /\ switch2Controller' = Append(switch2Controller, statusMsg'[self])
                                         ELSE /\ TRUE
-                                             /\ UNCHANGED << swSeqChangedStatus, 
+                                             /\ UNCHANGED << switch2Controller, 
                                                              controlMsgCounter, 
                                                              statusMsg >>
                                   /\ switchStatus' = [switchStatus EXCEPT ![self[2]] = [cpu |-> Failed, nicAsic |-> Failed,
@@ -1419,7 +1254,7 @@ SwitchFailure(self) == /\ pc[self] = "SwitchFailure"
                                   /\ Ofa2NicAsicBuff' = [Ofa2NicAsicBuff EXCEPT ![self[2]] = <<>>]
                                   /\ Installer2OfaBuff' = [Installer2OfaBuff EXCEPT ![self[2]] = <<>>]
                                   /\ Ofa2InstallerBuff' = [Ofa2InstallerBuff EXCEPT ![self[2]] = <<>>]
-                                  /\ TCAM' = [TCAM EXCEPT ![self[2]] = <<>>]
+                                  /\ TCAM' = [TCAM EXCEPT ![self[2]] = {}]
                                   /\ controller2Switch' = [controller2Switch EXCEPT ![self[2]] = <<>>]
                                   /\ UNCHANGED << notFailedSet, failedElem >>
                              ELSE /\ notFailedSet' = [notFailedSet EXCEPT ![self] = returnSwitchElementsNotFailed(self[2])]
@@ -1428,7 +1263,7 @@ SwitchFailure(self) == /\ pc[self] = "SwitchFailure"
                                        failedElem' = [failedElem EXCEPT ![self] = elem]
                                   /\ IF failedElem'[self] = "cpu"
                                         THEN /\ Assert(switchStatus[self[2]].cpu = NotFailed, 
-                                                       "Failure of assertion at line 182, column 9 of macro called at line 610, column 17.")
+                                                       "Failure of assertion at line 173, column 9 of macro called at line 565, column 17.")
                                              /\ switchStatus' = [switchStatus EXCEPT ![self[2]].cpu = Failed,
                                                                                      ![self[2]].ofa = Failed,
                                                                                      ![self[2]].installer = Failed]
@@ -1443,15 +1278,15 @@ SwitchFailure(self) == /\ pc[self] = "SwitchFailure"
                                                                                                         swID |-> self[2],
                                                                                                         num |-> controlMsgCounter'[self[2]]
                                                                                                     ]]
-                                                        /\ swSeqChangedStatus' = Append(swSeqChangedStatus, statusMsg'[self])
+                                                        /\ switch2Controller' = Append(switch2Controller, statusMsg'[self])
                                                    ELSE /\ TRUE
-                                                        /\ UNCHANGED << swSeqChangedStatus, 
+                                                        /\ UNCHANGED << switch2Controller, 
                                                                         controlMsgCounter, 
                                                                         statusMsg >>
                                              /\ UNCHANGED controller2Switch
                                         ELSE /\ IF failedElem'[self] = "ofa"
                                                    THEN /\ Assert(switchStatus[self[2]].cpu = NotFailed /\ switchStatus[self[2]].ofa = NotFailed, 
-                                                                  "Failure of assertion at line 222, column 9 of macro called at line 612, column 17.")
+                                                                  "Failure of assertion at line 213, column 9 of macro called at line 567, column 17.")
                                                         /\ switchStatus' = [switchStatus EXCEPT ![self[2]].ofa = Failed]
                                                         /\ IF switchStatus'[self[2]].nicAsic = NotFailed
                                                               THEN /\ controlMsgCounter' = [controlMsgCounter EXCEPT ![self[2]] = controlMsgCounter[self[2]] + 1]
@@ -1460,19 +1295,19 @@ SwitchFailure(self) == /\ pc[self] = "SwitchFailure"
                                                                                                                    swID |-> self[2],
                                                                                                                    num |-> controlMsgCounter'[self[2]]
                                                                                                                ]]
-                                                                   /\ swSeqChangedStatus' = Append(swSeqChangedStatus, statusMsg'[self])
+                                                                   /\ switch2Controller' = Append(switch2Controller, statusMsg'[self])
                                                               ELSE /\ TRUE
-                                                                   /\ UNCHANGED << swSeqChangedStatus, 
+                                                                   /\ UNCHANGED << switch2Controller, 
                                                                                    controlMsgCounter, 
                                                                                    statusMsg >>
                                                         /\ UNCHANGED controller2Switch
                                                    ELSE /\ IF failedElem'[self] = "installer"
                                                               THEN /\ Assert(switchStatus[self[2]].cpu = NotFailed /\ switchStatus[self[2]].installer = NotFailed, 
-                                                                             "Failure of assertion at line 254, column 9 of macro called at line 614, column 17.")
+                                                                             "Failure of assertion at line 245, column 9 of macro called at line 569, column 17.")
                                                                    /\ switchStatus' = [switchStatus EXCEPT ![self[2]].installer = Failed]
                                                                    /\ IF switchStatus'[self[2]].nicAsic = NotFailed /\ switchStatus'[self[2]].ofa = NotFailed
                                                                          THEN /\ Assert(switchStatus'[self[2]].installer = Failed, 
-                                                                                        "Failure of assertion at line 257, column 13 of macro called at line 614, column 17.")
+                                                                                        "Failure of assertion at line 248, column 13 of macro called at line 569, column 17.")
                                                                               /\ controlMsgCounter' = [controlMsgCounter EXCEPT ![self[2]] = controlMsgCounter[self[2]] + 1]
                                                                               /\ statusMsg' = [statusMsg EXCEPT ![self] =              [
                                                                                                                               type |-> KEEP_ALIVE,
@@ -1480,15 +1315,15 @@ SwitchFailure(self) == /\ pc[self] = "SwitchFailure"
                                                                                                                               num |-> controlMsgCounter'[self[2]],
                                                                                                                               installerStatus |-> getInstallerStatus(switchStatus'[self[2]].installer)
                                                                                                                           ]]
-                                                                              /\ swSeqChangedStatus' = Append(swSeqChangedStatus, statusMsg'[self])
+                                                                              /\ switch2Controller' = Append(switch2Controller, statusMsg'[self])
                                                                          ELSE /\ TRUE
-                                                                              /\ UNCHANGED << swSeqChangedStatus, 
+                                                                              /\ UNCHANGED << switch2Controller, 
                                                                                               controlMsgCounter, 
                                                                                               statusMsg >>
                                                                    /\ UNCHANGED controller2Switch
                                                               ELSE /\ IF failedElem'[self] = "nicAsic"
                                                                          THEN /\ Assert(switchStatus[self[2]].nicAsic = NotFailed, 
-                                                                                        "Failure of assertion at line 143, column 9 of macro called at line 616, column 17.")
+                                                                                        "Failure of assertion at line 134, column 9 of macro called at line 571, column 17.")
                                                                               /\ switchStatus' = [switchStatus EXCEPT ![self[2]].nicAsic = Failed]
                                                                               /\ controller2Switch' = [controller2Switch EXCEPT ![self[2]] = <<>>]
                                                                               /\ controlMsgCounter' = [controlMsgCounter EXCEPT ![self[2]] = controlMsgCounter[self[2]] + 1]
@@ -1497,11 +1332,11 @@ SwitchFailure(self) == /\ pc[self] = "SwitchFailure"
                                                                                                                               swID |-> self[2],
                                                                                                                               num |-> controlMsgCounter'[self[2]]
                                                                                                                           ]]
-                                                                              /\ swSeqChangedStatus' = Append(swSeqChangedStatus, statusMsg'[self])
+                                                                              /\ switch2Controller' = Append(switch2Controller, statusMsg'[self])
                                                                          ELSE /\ Assert(FALSE, 
-                                                                                        "Failure of assertion at line 617, column 18.")
-                                                                              /\ UNCHANGED << swSeqChangedStatus, 
-                                                                                              controller2Switch, 
+                                                                                        "Failure of assertion at line 572, column 18.")
+                                                                              /\ UNCHANGED << controller2Switch, 
+                                                                                              switch2Controller, 
                                                                                               switchStatus, 
                                                                                               controlMsgCounter, 
                                                                                               statusMsg >>
@@ -1511,10 +1346,9 @@ SwitchFailure(self) == /\ pc[self] = "SwitchFailure"
                                                              Ofa2InstallerBuff >>
                                   /\ TCAM' = TCAM
                        /\ pc' = [pc EXCEPT ![self] = "SwitchFailure"]
-                       /\ UNCHANGED << switchLock, controllerLock, SwProcSet, 
-                                       switch2Controller, installedIRs, 
-                                       ingressPkt, ingressIR, egressMsg, 
-                                       ofaInMsg, ofaOutConfirmation, 
+                       /\ UNCHANGED << switchLock, controllerLock, 
+                                       installedIRs, ingressPkt, ingressIR, 
+                                       egressMsg, ofaInMsg, ofaOutConfirmation, 
                                        installerInIR, failedSet, 
                                        statusResolveMsg, recoveredElem >>
 
@@ -1526,13 +1360,13 @@ SwitchResolveFailure(self) == /\ pc[self] = "SwitchResolveFailure"
                                  /\ switchLock = <<NO_LOCK, NO_LOCK>>
                               /\ IF RecoveryStatus[self[2]].partial = 0
                                     THEN /\ Assert(switchStatus[self[2]].cpu = Failed, 
-                                                   "Failure of assertion at line 113, column 9 of macro called at line 633, column 13.")
+                                                   "Failure of assertion at line 104, column 9 of macro called at line 588, column 13.")
                                          /\ Assert(switchStatus[self[2]].nicAsic = Failed, 
-                                                   "Failure of assertion at line 114, column 9 of macro called at line 633, column 13.")
+                                                   "Failure of assertion at line 105, column 9 of macro called at line 588, column 13.")
                                          /\ Assert(switchStatus[self[2]].ofa = Failed, 
-                                                   "Failure of assertion at line 115, column 9 of macro called at line 633, column 13.")
+                                                   "Failure of assertion at line 106, column 9 of macro called at line 588, column 13.")
                                          /\ Assert(switchStatus[self[2]].installer = Failed, 
-                                                   "Failure of assertion at line 116, column 9 of macro called at line 633, column 13.")
+                                                   "Failure of assertion at line 107, column 9 of macro called at line 588, column 13.")
                                          /\ nicAsicStartingMode(self[2])
                                          /\ ofaStartingMode(self[2])
                                          /\ installerInStartingMode(self[2])
@@ -1542,7 +1376,7 @@ SwitchResolveFailure(self) == /\ pc[self] = "SwitchResolveFailure"
                                          /\ Ofa2NicAsicBuff' = [Ofa2NicAsicBuff EXCEPT ![self[2]] = <<>>]
                                          /\ Installer2OfaBuff' = [Installer2OfaBuff EXCEPT ![self[2]] = <<>>]
                                          /\ Ofa2InstallerBuff' = [Ofa2InstallerBuff EXCEPT ![self[2]] = <<>>]
-                                         /\ TCAM' = [TCAM EXCEPT ![self[2]] = <<>>]
+                                         /\ TCAM' = [TCAM EXCEPT ![self[2]] = {}]
                                          /\ controller2Switch' = [controller2Switch EXCEPT ![self[2]] = <<>>]
                                          /\ controlMsgCounter' = [controlMsgCounter EXCEPT ![self[2]] = controlMsgCounter[self[2]] + 1]
                                          /\ statusResolveMsg' = [statusResolveMsg EXCEPT ![self] =                     [
@@ -1551,7 +1385,7 @@ SwitchResolveFailure(self) == /\ pc[self] = "SwitchResolveFailure"
                                                                                                        num |-> controlMsgCounter'[self[2]],
                                                                                                        installerStatus |-> getInstallerStatus(switchStatus'[self[2]].installer)
                                                                                                    ]]
-                                         /\ swSeqChangedStatus' = Append(swSeqChangedStatus, statusResolveMsg'[self])
+                                         /\ switch2Controller' = Append(switch2Controller, statusResolveMsg'[self])
                                          /\ UNCHANGED << failedSet, 
                                                          recoveredElem >>
                                     ELSE /\ failedSet' = [failedSet EXCEPT ![self] = returnSwitchFailedElements(self[2])]
@@ -1561,7 +1395,7 @@ SwitchResolveFailure(self) == /\ pc[self] = "SwitchResolveFailure"
                                          /\ IF recoveredElem'[self] = "cpu"
                                                THEN /\ ofaStartingMode(self[2]) /\ installerInStartingMode(self[2])
                                                     /\ Assert(switchStatus[self[2]].cpu = Failed, 
-                                                              "Failure of assertion at line 202, column 9 of macro called at line 641, column 43.")
+                                                              "Failure of assertion at line 193, column 9 of macro called at line 596, column 43.")
                                                     /\ switchStatus' = [switchStatus EXCEPT ![self[2]].cpu = NotFailed,
                                                                                             ![self[2]].ofa = NotFailed,
                                                                                             ![self[2]].installer = NotFailed]
@@ -1577,16 +1411,16 @@ SwitchResolveFailure(self) == /\ pc[self] = "SwitchResolveFailure"
                                                                                                                              num |-> controlMsgCounter'[self[2]],
                                                                                                                              installerStatus |-> getInstallerStatus(switchStatus'[self[2]].installer)
                                                                                                                          ]]
-                                                               /\ swSeqChangedStatus' = Append(swSeqChangedStatus, statusResolveMsg'[self])
+                                                               /\ switch2Controller' = Append(switch2Controller, statusResolveMsg'[self])
                                                           ELSE /\ TRUE
-                                                               /\ UNCHANGED << swSeqChangedStatus, 
+                                                               /\ UNCHANGED << switch2Controller, 
                                                                                controlMsgCounter, 
                                                                                statusResolveMsg >>
                                                     /\ UNCHANGED controller2Switch
                                                ELSE /\ IF recoveredElem'[self] = "nicAsic"
                                                           THEN /\ nicAsicStartingMode(self[2])
                                                                /\ Assert(switchStatus[self[2]].nicAsic = Failed, 
-                                                                         "Failure of assertion at line 158, column 9 of macro called at line 642, column 50.")
+                                                                         "Failure of assertion at line 149, column 9 of macro called at line 597, column 50.")
                                                                /\ switchStatus' = [switchStatus EXCEPT ![self[2]].nicAsic = NotFailed]
                                                                /\ controller2Switch' = [controller2Switch EXCEPT ![self[2]] = <<>>]
                                                                /\ IF switchStatus'[self[2]].ofa = Failed
@@ -1603,11 +1437,11 @@ SwitchResolveFailure(self) == /\ pc[self] = "SwitchResolveFailure"
                                                                                                                                         num |-> controlMsgCounter'[self[2]],
                                                                                                                                         installerStatus |-> getInstallerStatus(switchStatus'[self[2]].installer)
                                                                                                                                     ]]
-                                                               /\ swSeqChangedStatus' = Append(swSeqChangedStatus, statusResolveMsg'[self])
+                                                               /\ switch2Controller' = Append(switch2Controller, statusResolveMsg'[self])
                                                           ELSE /\ IF recoveredElem'[self] = "ofa"
                                                                      THEN /\ ofaStartingMode(self[2])
                                                                           /\ Assert(switchStatus[self[2]].cpu = NotFailed /\ switchStatus[self[2]].ofa = Failed, 
-                                                                                    "Failure of assertion at line 238, column 9 of macro called at line 643, column 46.")
+                                                                                    "Failure of assertion at line 229, column 9 of macro called at line 598, column 46.")
                                                                           /\ switchStatus' = [switchStatus EXCEPT ![self[2]].ofa = NotFailed]
                                                                           /\ IF switchStatus'[self[2]].nicAsic = NotFailed
                                                                                 THEN /\ controlMsgCounter' = [controlMsgCounter EXCEPT ![self[2]] = controlMsgCounter[self[2]] + 1]
@@ -1617,19 +1451,19 @@ SwitchResolveFailure(self) == /\ pc[self] = "SwitchResolveFailure"
                                                                                                                                                    num |-> controlMsgCounter'[self[2]],
                                                                                                                                                    installerStatus |-> getInstallerStatus(switchStatus'[self[2]].installer)
                                                                                                                                                ]]
-                                                                                     /\ swSeqChangedStatus' = Append(swSeqChangedStatus, statusResolveMsg'[self])
+                                                                                     /\ switch2Controller' = Append(switch2Controller, statusResolveMsg'[self])
                                                                                 ELSE /\ TRUE
-                                                                                     /\ UNCHANGED << swSeqChangedStatus, 
+                                                                                     /\ UNCHANGED << switch2Controller, 
                                                                                                      controlMsgCounter, 
                                                                                                      statusResolveMsg >>
                                                                      ELSE /\ IF recoveredElem'[self] = "installer"
                                                                                 THEN /\ installerInStartingMode(self[2])
                                                                                      /\ Assert(switchStatus[self[2]].cpu = NotFailed /\ switchStatus[self[2]].installer = Failed, 
-                                                                                               "Failure of assertion at line 272, column 9 of macro called at line 644, column 52.")
+                                                                                               "Failure of assertion at line 263, column 9 of macro called at line 599, column 52.")
                                                                                      /\ switchStatus' = [switchStatus EXCEPT ![self[2]].installer = NotFailed]
                                                                                      /\ IF switchStatus'[self[2]].nicAsic = NotFailed /\ switchStatus'[self[2]].ofa = NotFailed
                                                                                            THEN /\ Assert(switchStatus'[self[2]].installer = NotFailed, 
-                                                                                                          "Failure of assertion at line 275, column 13 of macro called at line 644, column 52.")
+                                                                                                          "Failure of assertion at line 266, column 13 of macro called at line 599, column 52.")
                                                                                                 /\ controlMsgCounter' = [controlMsgCounter EXCEPT ![self[2]] = controlMsgCounter[self[2]] + 1]
                                                                                                 /\ statusResolveMsg' = [statusResolveMsg EXCEPT ![self] =                     [
                                                                                                                                                               type |-> KEEP_ALIVE,
@@ -1637,14 +1471,14 @@ SwitchResolveFailure(self) == /\ pc[self] = "SwitchResolveFailure"
                                                                                                                                                               num |-> controlMsgCounter'[self[2]],
                                                                                                                                                               installerStatus |-> getInstallerStatus(switchStatus'[self[2]].installer)
                                                                                                                                                           ]]
-                                                                                                /\ swSeqChangedStatus' = Append(swSeqChangedStatus, statusResolveMsg'[self])
+                                                                                                /\ switch2Controller' = Append(switch2Controller, statusResolveMsg'[self])
                                                                                            ELSE /\ TRUE
-                                                                                                /\ UNCHANGED << swSeqChangedStatus, 
+                                                                                                /\ UNCHANGED << switch2Controller, 
                                                                                                                 controlMsgCounter, 
                                                                                                                 statusResolveMsg >>
                                                                                 ELSE /\ Assert(FALSE, 
-                                                                                               "Failure of assertion at line 645, column 18.")
-                                                                                     /\ UNCHANGED << swSeqChangedStatus, 
+                                                                                               "Failure of assertion at line 600, column 18.")
+                                                                                     /\ UNCHANGED << switch2Controller, 
                                                                                                      switchStatus, 
                                                                                                      controlMsgCounter, 
                                                                                                      statusResolveMsg >>
@@ -1657,10 +1491,10 @@ SwitchResolveFailure(self) == /\ pc[self] = "SwitchResolveFailure"
                               /\ RecoveryStatus' = [RecoveryStatus EXCEPT ![self[2]] = [transient |-> 0, partial |-> 0]]
                               /\ pc' = [pc EXCEPT ![self] = "SwitchResolveFailure"]
                               /\ UNCHANGED << switchLock, controllerLock, 
-                                              sw_fail_ordering_var, SwProcSet, 
-                                              switch2Controller, installedIRs, 
-                                              ingressPkt, ingressIR, egressMsg, 
-                                              ofaInMsg, ofaOutConfirmation, 
+                                              sw_fail_ordering_var, 
+                                              installedIRs, ingressPkt, 
+                                              ingressIR, egressMsg, ofaInMsg, 
+                                              ofaOutConfirmation, 
                                               installerInIR, statusMsg, 
                                               notFailedSet, failedElem, obj >>
 
@@ -1688,11 +1522,10 @@ ghostProc(self) == /\ pc[self] = "ghostProc"
                                                                      ELSE /\ TRUE
                    /\ Assert(\/ switchLock[2] = switchLock[2]
                              \/ switchLock[2] = NO_LOCK, 
-                             "Failure of assertion at line 377, column 9 of macro called at line 681, column 9.")
+                             "Failure of assertion at line 361, column 9 of macro called at line 636, column 9.")
                    /\ switchLock' = <<NO_LOCK, NO_LOCK>>
                    /\ pc' = [pc EXCEPT ![self] = "ghostProc"]
                    /\ UNCHANGED << controllerLock, sw_fail_ordering_var, 
-                                   SwProcSet, swSeqChangedStatus, 
                                    controller2Switch, switch2Controller, 
                                    switchStatus, installedIRs, NicAsic2OfaBuff, 
                                    Ofa2NicAsicBuff, Installer2OfaBuff, 
