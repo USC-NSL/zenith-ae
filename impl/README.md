@@ -61,7 +61,7 @@ docker pull rabbitmq:3
 
 # Run the containers (we use the name `nib-queue` for the broker and `nib-db` for the DB)
 docker run -d --name nib-db -p 27017:27017 mongo:latest mongod --replSet nibRS
-docker run -d --name nib-queue -p 5672 rabbitmq:3
+docker run -d --name nib-queue -p 5672:5672 rabbitmq:3
 
 # Initiate a replication set for our NIB database
 docker exec -it nib-db mongosh --eval "rs.initiate({_id: "nibRS", members: [{_id: 0, host: "127.0.0.1:27017"}, {_id: 1, host: "127.0.0.1:27018"}, {_id: 2, host: "127.0.0.1:27019"}]})"
