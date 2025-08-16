@@ -41,8 +41,8 @@ DISABLE_TRANSACTIONS = True
 
 # RabbitMQ host
 DEFAULT_RBQ_HOST = "127.0.0.1"
-DEFAULT_RBQ_USER = "docker"
-DEFAULT_RBQ_PASS = "docker"
+DEFAULT_RBQ_USER = "guest"
+DEFAULT_RBQ_PASS = "guest"
 
 # Queue types
 class QueueTypes:
