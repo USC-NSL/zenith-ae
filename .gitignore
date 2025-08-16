@@ -6,4 +6,9 @@ states
 
 # Python
 *.pyc
-
+pyvenv.cfg
+lib
+lib64
+include
+share
+bin

@@ -1,0 +1,28 @@
+syntax = "proto3";
+import "google/protobuf/empty.proto";
+
+
+service PrivilegedProxyService {
+    rpc MakeDatapath(DPIDMessage) returns (google.protobuf.Empty) {}
+    rpc AsyncBlockDatapath(DPIDMessage) returns (google.protobuf.Empty) {}
+    rpc AsyncUnblockDatapath(DPIDMessage) returns (google.protobuf.Empty) {}
+    rpc AsyncWipeoutDatapath(DPIDMessage) returns (google.protobuf.Empty) {}
+    rpc SyncBlockDatapath(DPIDMessage) returns (google.protobuf.Empty) {}
+    rpc SyncUnblockDatapath(DPIDMessage) returns (google.protobuf.Empty) {}
+    rpc SyncWipeoutDatapath(DPIDMessage) returns (google.protobuf.Empty) {}
+    rpc QueryDatapath(DPIDMessage) returns (QueryDatapathResponse) {}
+    rpc QueryAll(google.protobuf.Empty) returns (QueryAllResponse) {}
+    rpc CloseNode(DPIDMessage) returns (google.protobuf.Empty) {}
+}
+
+message DPIDMessage {
+    int32 dp_id = 1;
+}
+
+message QueryDatapathResponse {
+    repeated int32 cookies = 1;
+}
+
+message QueryAllResponse {
+    map<int32, QueryDatapathResponse> tcams = 1;
+}
